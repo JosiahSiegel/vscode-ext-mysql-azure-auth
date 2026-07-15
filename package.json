@@ -3,6 +3,7 @@
   "displayName": "MySQL Azure Auth",
   "description": "Connect, browse, and query Azure Database for MySQL Flexible Server using Microsoft Entra ID",
   "version": "0.1.0",
+  "packageManager": "npm@10.8.1",
   "publisher": "your-publisher",
   "license": "MIT",
   "repository": {
@@ -208,6 +209,9 @@
     }
   },
   "scripts": {
+    "check:runtime": "node scripts/check-runtime.mjs",
+    "package:verify": "node scripts/verify-task.mjs package",
+    "verify:t1": "node scripts/verify-task.mjs 1",
     "vscode:prepublish": "npm run esbuild-base -- --minify",
     "esbuild-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
     "compile": "npm run esbuild-base -- --sourcemap && npm run build:integration && npm run icons:regen",

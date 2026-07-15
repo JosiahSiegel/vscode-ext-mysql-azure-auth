@@ -74,8 +74,21 @@ suite('Public surface lock', () => {
         ]) {
             assert.ok(events.includes(`onCommand:${cmd}`), `activation for ${cmd}`);
         }
-        assert.ok(events.includes('onLanguage:sql'));
-        assert.ok(events.includes('onLanguage:mysql'));
+        // Locked contract: `onLanguage:sql`, `onLanguage:mysql`, and
+        // `workspaceContains:**/.vscode/mysql.json` were removed by Todo 2
+        // and locked in by Todo 7's MANIFEST READY branch. This test must
+        // stay in sync with the validator; if any of these linger, the
+        // manifest validator still fails.
+        for (const forbidden of [
+            'onLanguage:sql',
+            'onLanguage:mysql',
+            'workspaceContains:**/.vscode/mysql.json',
+        ]) {
+            assert.ok(
+                !events.includes(forbidden),
+                `activation ${forbidden} must not be present; the validator contract forbids it`
+            );
+        }
     });
 
     test('views container and views are preserved', () => {
@@ -93,11 +106,30 @@ suite('Public surface lock', () => {
         assert.strictEqual(serversView.name, 'Servers');
     });
 
-    test('settings key is preserved (regression: storage reads this exact key)', () => {
-        const serversSetting = pkg.contributes.configuration.properties['mysqlAzureAuth.servers'];
-        assert.ok(serversSetting, 'expected mysqlAzureAuth.servers setting');
-        assert.strictEqual(serversSetting.type, 'array');
-        assert.deepStrictEqual(serversSetting.default, []);
+    test('settings keys match the locked contract (regression: storage reads these exact keys)', () => {
+        // Locked contract: the Todo 2 cleanup removed `mysqlAzureAuth.servers`
+        // and `mysqlAzureAuth.connectionColors` (they were unused / unread).
+        // The remaining settings are only the three that production code actually
+        // consumes today. This test must stay in sync with the validator
+        // MANIFEST READY contract from Todo 7.
+        const properties = pkg.contributes.configuration.properties;
+        const expectedKeys = [
+            'mysqlAzureAuth.historyLimit',
+            'mysqlAzureAuth.showRowCounts',
+            'mysqlAzureAuth.enableStatusBar',
+        ];
+        for (const key of expectedKeys) {
+            assert.ok(properties[key], `expected ${key} setting`);
+        }
+        for (const forbidden of [
+            'mysqlAzureAuth.servers',
+            'mysqlAzureAuth.connectionColors',
+        ]) {
+            assert.ok(
+                !properties[forbidden],
+                `setting ${forbidden} must not be present; the validator contract forbids it`
+            );
+        }
     });
 
     test('integration test hand-built context and the integration suite rely on the same contract', () => {

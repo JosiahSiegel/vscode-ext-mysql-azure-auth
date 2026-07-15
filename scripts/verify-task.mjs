@@ -383,7 +383,133 @@ export const _internal = {
   PRODUCT_SENTENCE,
   VALID_DISPOSITIONS,
   validateHistoryFixture,
+  validateGovernanceFixture,
+  validateOwnerInput,
 };
+
+/* ---------------------------------------------------------------------------
+ * Todo 4 — open-source governance
+ * -------------------------------------------------------------------------*/
+
+const OWNER_INPUT_PATH = ".omo/inputs/project-direction-open-source.json";
+const GOVERNANCE_DOC_PATHS = {
+  security: "SECURITY.md",
+  contributing: "CONTRIBUTING.md",
+  support: "SUPPORT.md",
+  changelog: "CHANGELOG.md",
+  bugTemplate: ".github/ISSUE_TEMPLATE/bug-report.md",
+  featureTemplate: ".github/ISSUE_TEMPLATE/feature-request.md",
+  prTemplate: ".github/PULL_REQUEST_TEMPLATE.md",
+};
+const GOVERNANCE_FIXTURE_CASES = new Set(["missing-owner", "placeholder-contact", "valid"]);
+const PLACEHOLDER_TOKENS = ["TODO", "your-", "placeholder", "TBD", "FIXME", "<placeholder>"];
+const PLACEHOLDER_CONTACT_FRAGMENT = "Owner contact not yet configured";
+
+function normalizeGitHubRepoUrl(value) {
+  if (typeof value !== "string") return "";
+  let url = value.trim();
+  if (url.endsWith("/")) url = url.slice(0, -1);
+  if (url.endsWith(".git")) url = url.slice(0, -4);
+  return url;
+}
+
+function hasPlaceholderToken(value) {
+  if (typeof value !== "string") return false;
+  const lower = value.toLowerCase();
+  return PLACEHOLDER_TOKENS.some((token) => lower.includes(token.toLowerCase()));
+}
+
+function validateOwnerInput(owner) {
+  if (!isPlainObject(owner)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  const copyrightHolder = typeof owner.copyrightHolder === "string" ? owner.copyrightHolder.trim() : "";
+  if (copyrightHolder.length < 2 || copyrightHolder.length > 100) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  if (hasPlaceholderToken(copyrightHolder) || /[<>]|your-/i.test(copyrightHolder) || /TODO|placeholder/i.test(copyrightHolder)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  if (/[\r\n]/.test(copyrightHolder)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  const publisherId = typeof owner.publisherId === "string" ? owner.publisherId : "";
+  if (!/^[a-z0-9][a-z0-9-]{2,49}$/.test(publisherId)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  const repositoryUrl =
+    typeof owner.repositoryUrl === "string" ? normalizeGitHubRepoUrl(owner.repositoryUrl) : "";
+  if (!/^https:\/\/github\.com\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(repositoryUrl)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  const securityContact = typeof owner.securityContact === "string" ? owner.securityContact.trim() : "";
+  const mailtoMatch = /^mailto:([^\s<>"']+)@([^\s<>"']+)$/.exec(securityContact);
+  const httpsMatch = /^https:\/\/[^\s<>"']+$/.exec(securityContact);
+  if (!mailtoMatch && !httpsMatch) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  if (hasPlaceholderToken(securityContact)) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  const support = owner.supportCommitment;
+  if (!isPlainObject(support) || support.accepted !== true) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  const acceptedAt = typeof support.acceptedAt === "string" ? support.acceptedAt : "";
+  const isoDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  if (!isoDate.test(acceptedAt) || Number.isNaN(Date.parse(acceptedAt))) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  if (typeof support.securityAckDays !== "number" || !Number.isInteger(support.securityAckDays) || support.securityAckDays < 1 || support.securityAckDays > 7) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+  if (typeof support.criticalFixTargetDays !== "number" || !Number.isInteger(support.criticalFixTargetDays) || support.criticalFixTargetDays < 1 || support.criticalFixTargetDays > 30) {
+    return { ok: false, code: "MISSING OWNER IDENTITY" };
+  }
+
+  return {
+    ok: true,
+    owner: {
+      copyrightHolder,
+      publisherId,
+      repositoryUrl,
+      securityContact,
+      support: {
+        acceptedAt,
+        securityAckDays: support.securityAckDays,
+        criticalFixTargetDays: support.criticalFixTargetDays,
+      },
+    },
+  };
+}
+
+export function validateGovernanceFixture(fixture) {
+  if (!isPlainObject(fixture)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  const owner = isPlainObject(fixture.owner) ? fixture.owner : null;
+  if (!owner || typeof fixture.case !== "string") {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (!GOVERNANCE_FIXTURE_CASES.has(fixture.case)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  return { ok: true, fixture };
+}
+
+async function fileExists(path) {
+  try {
+    await readFile(resolve(process.cwd(), path), "utf8");
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const task = process.argv[2];
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
@@ -526,6 +652,83 @@ if (!invokedDirectly) {
             : [];
           console.log(JSON.stringify(unreadable, null, 2));
           process.exitCode = 2;
+        }
+      }
+    }
+  }
+} else if (task === "4") {
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("GOVERNANCE NOT READY: FIXTURE_INVALID");
+    process.exitCode = 2;
+  } else {
+    let fixture = null;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("GOVERNANCE NOT READY: FIXTURE_INVALID");
+      process.exitCode = 2;
+    }
+    if (fixture) {
+      const validation = validateGovernanceFixture(fixture);
+      if (!validation.ok) {
+        console.error("GOVERNANCE NOT READY: FIXTURE_INVALID");
+        process.exitCode = 2;
+      } else {
+        const ownerInputRaw = (await fileExists(OWNER_INPUT_PATH))
+          ? JSON.parse(await readFile(resolve(process.cwd(), OWNER_INPUT_PATH), "utf8"))
+          : null;
+        const ownerValidation = validateOwnerInput(ownerInputRaw?.owner ?? null);
+        if (!ownerValidation.ok) {
+          console.log(`GOVERNANCE NOT DISTRIBUTABLE: ${ownerValidation.code}`);
+          process.exitCode = 1;
+        } else {
+          let packageManifest = null;
+          try {
+            packageManifest = await loadJson("package.json");
+          } catch {
+            console.log("GOVERNANCE NOT READY: MANIFEST_MISSING");
+            process.exitCode = 2;
+          }
+          if (packageManifest) {
+            const liveRepoUrl = normalizeGitHubRepoUrl(packageManifest.repository?.url ?? "");
+            if (liveRepoUrl !== ownerValidation.owner.repositoryUrl) {
+              console.log("GOVERNANCE NOT READY: REPOSITORY_MISMATCH");
+              process.exitCode = 2;
+            } else {
+              let placeholderDocument = false;
+              const missingDocs = [];
+              for (const [key, path] of Object.entries(GOVERNANCE_DOC_PATHS)) {
+                if (!(await fileExists(path))) {
+                  missingDocs.push(`${key}:${path}`);
+                  continue;
+                }
+                if (key === "security") {
+                  const body = await readFile(resolve(process.cwd(), path), "utf8");
+                  if (body.includes(PLACEHOLDER_CONTACT_FRAGMENT)) {
+                    placeholderDocument = true;
+                  }
+                }
+              }
+              if (missingDocs.length) {
+                console.log("GOVERNANCE NOT READY: MISSING_DOC");
+                console.error(`missing=${missingDocs.join(",")}`);
+                process.exitCode = 2;
+              } else if (placeholderDocument) {
+                console.log("GOVERNANCE NOT READY: PLACEHOLDER_CONTACT");
+                process.exitCode = 2;
+              } else {
+                const securityBody = await readFile(resolve(process.cwd(), GOVERNANCE_DOC_PATHS.security), "utf8");
+                if (!securityBody.includes(ownerValidation.owner.securityContact)) {
+                  console.log("GOVERNANCE NOT READY: SECURITY_CONTACT_NOT_REFERENCED");
+                  process.exitCode = 2;
+                } else {
+                  console.log("GOVERNANCE DISTRIBUTABLE");
+                }
+              }
+            }
+          }
         }
       }
     }

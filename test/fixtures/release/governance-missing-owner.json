@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "missing-owner",
+  "description": "Synthetic governance fixture for Todo 4 — exercises the missing-owner branch of validateGovernanceFixture. When this fixture is paired with the absent .omo/inputs/project-direction-open-source.json in the working tree, the verify-task.mjs Todo 4 branch deterministically emits GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY and exits 1. It does not describe a real owner.",
+  "owner": {
+    "copyrightHolder": "Fixture Owner (synthetic)",
+    "publisherId": "fixture-owner",
+    "repositoryUrl": "https://github.com/fixture/mysql-azure-auth",
+    "securityContact": "mailto:fixture@example.invalid",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

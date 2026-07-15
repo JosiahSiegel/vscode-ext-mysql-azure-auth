@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "valid",
+  "description": "Illustrative governance fixture for Todo 4 — only meaningful once .omo/inputs/project-direction-open-source.json is populated with the same owner values. The verify-task.mjs Todo 4 branch reads the real input file at runtime, not this fixture, so this entry documents the shape of a passing owner identity. It must NOT be auto-promoted to DISTRIBUTABLE without a real owner input on disk.",
+  "owner": {
+    "copyrightHolder": "Your Name or Org",
+    "publisherId": "your-publisher",
+    "repositoryUrl": "https://github.com/your-org/mysql-azure-auth",
+    "securityContact": "mailto:security@example.com",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

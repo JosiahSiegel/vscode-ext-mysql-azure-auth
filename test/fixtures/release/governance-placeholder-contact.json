@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "placeholder-contact",
+  "description": "Synthetic governance fixture for Todo 4 — exercises the placeholder-contact branch of the verify-task.mjs Todo 4 governance cross-check. The script detects the SECURITY.md placeholder line (\"Owner contact not yet configured\") and returns GOVERNANCE NOT READY: PLACEHOLDER_CONTACT with exit code 2. The fixture's owner record is intentionally not authoritative; it only documents the fixture case so a future run is reproducible.",
+  "owner": {
+    "copyrightHolder": "Placeholder Holder (synthetic)",
+    "publisherId": "placeholder-holder",
+    "repositoryUrl": "https://github.com/placeholder/mysql-azure-auth",
+    "securityContact": "mailto:placeholder@example.invalid",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

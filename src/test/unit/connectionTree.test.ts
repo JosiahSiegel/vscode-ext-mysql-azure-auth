@@ -22,6 +22,19 @@ import { GlobalStateConnectionCatalog } from '../../registry/connectionCatalog';
 import type { DatabaseSessionConfig, PoolFactory, PoolLike } from '../../registry/databaseSession';
 import { makeConnectionConfig } from '../factories/connectionConfig';
 
+/**
+ * Stub identity. The tree renderer only inspects registry state, never
+ * the credential chain, so a constant-token stub keeps the tests
+ * network-free.
+ */
+function fakeIdentity(): { readonly getAccessToken: () => Promise<string> } {
+    return {
+        async getAccessToken(): Promise<string> {
+            return 'fake-token';
+        },
+    };
+}
+
 function buildFakePool(rows: unknown[] = [], fields: { name: string }[] = []) {
     const fakeEnd = sinon.stub().resolves();
     const fakeExecute = sinon.stub().resolves([rows, fields]);
@@ -50,7 +63,7 @@ suite('ServerTree', () => {
         catalog = new GlobalStateConnectionCatalog(
             extensionContext as unknown as import('vscode').ExtensionContext
         );
-        registry = new ActorRegistry();
+        registry = new ActorRegistry({ identity: fakeIdentity() });
         provider = new ServerTree({ catalog, registry });
     });
 
@@ -72,7 +85,7 @@ suite('ServerTree', () => {
 
     test('a connected server renders with contextValue=server-live', async () => {
         const fake = buildFakePool();
-        const connRegistry = new ActorRegistry({ poolFactory: fake.factory });
+        const connRegistry = new ActorRegistry({ identity: fakeIdentity(), poolFactory: fake.factory });
         const connProvider = new ServerTree({
             catalog,
             registry: connRegistry,
@@ -91,7 +104,7 @@ suite('ServerTree', () => {
             [{ Tables_in_db: 'users' }, { Tables_in_db: 'orders' }],
             [{ name: 'Tables_in_db' }]
         );
-        const connRegistry = new ActorRegistry({ poolFactory: fake.factory });
+        const connRegistry = new ActorRegistry({ identity: fakeIdentity(), poolFactory: fake.factory });
         const connProvider = new ServerTree({
             catalog,
             registry: connRegistry,

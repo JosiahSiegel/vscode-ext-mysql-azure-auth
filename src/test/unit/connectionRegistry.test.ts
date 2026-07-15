@@ -11,7 +11,7 @@
 
 import * as assert from 'assert';
 import { __test__ } from '../mocks/vscode';
-import { getIdentityProvider } from '../../identity/entraToken';
+import { EntraTokenProvider } from '../../identity/entraToken';
 import { ActorRegistry } from '../../registry/actorRegistry';
 import type { ConnectionConfig } from '../../domain';
 import type { PoolFactory, DatabaseSessionConfig, PoolLike } from '../../registry/databaseSession';
@@ -48,6 +48,16 @@ function buildFakePool() {
 // `sinon` is used inside buildFakePool above.
 import * as sinon from 'sinon';
 
+/**
+ * Build a fresh identity whose token acquisition routes through the
+ * in-memory `vscode.authentication.getSession` mock. The default
+ * `EntraTokenProvider` constructor wires `VSCodeIdentitySource -> AzureCli`,
+ * which matches the production chain shape.
+ */
+function makeDefaultIdentity(): EntraTokenProvider {
+    return new EntraTokenProvider();
+}
+
 suite('ActorRegistry', () => {
     setup(() => {
         __test__.reset();
@@ -66,14 +76,17 @@ suite('ActorRegistry', () => {
     });
 
     test('lookup returns unknown for an id that has never been connected', () => {
-        const reg = new ActorRegistry();
+        const reg = new ActorRegistry({ identity: makeDefaultIdentity() });
         const result = reg.lookup('cfg-x');
         assert.strictEqual(result.tag, 'unknown');
     });
 
     test('connect transitions disconnected -> connecting -> connected', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         const cfg = makeConnectionConfig({ id: 'cfg-1' });
 
         await reg.connect('cfg-1', cfg);
@@ -87,7 +100,10 @@ suite('ActorRegistry', () => {
 
     test('isConnected returns true only for connected or refreshing states', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         const cfg = makeConnectionConfig();
 
         assert.strictEqual(reg.isConnected('cfg-1'), false);
@@ -99,7 +115,10 @@ suite('ActorRegistry', () => {
 
     test('concurrent connect() calls do not create duplicate sessions', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         const cfg = makeConnectionConfig();
 
         await Promise.all([
@@ -115,9 +134,12 @@ suite('ActorRegistry', () => {
     test('concurrent same-id connects acquire a token once while acquisition is pending', async () => {
         const fake = buildFakePool();
         const token = deferred<string>();
-        const identity = getIdentityProvider();
+        const identity = makeDefaultIdentity();
         const getAccessToken = sinon.stub(identity, 'getAccessToken').returns(token.promise);
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity,
+            poolFactory: fake.factory,
+        });
         const cfg = makeConnectionConfig({ id: 'cfg-1' });
 
         const connects = [
@@ -137,10 +159,11 @@ suite('ActorRegistry', () => {
     test('token acquisition timeout fails the actor and permits a later connect', async () => {
         const fake = buildFakePool();
         const firstToken = deferred<string>();
-        const identity = getIdentityProvider();
+        const identity = makeDefaultIdentity();
         const getAccessToken = sinon.stub(identity, 'getAccessToken');
         const clock = sinon.useFakeTimers();
         const reg = new ActorRegistry({
+            identity,
             poolFactory: fake.factory,
             tokenAcquisitionTimeoutMs: 25,
         });
@@ -172,7 +195,10 @@ suite('ActorRegistry', () => {
 
     test('operations on DIFFERENT ids run concurrently', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
 
         const start = Date.now();
         await Promise.all([
@@ -194,7 +220,10 @@ suite('ActorRegistry', () => {
 
     test('operations on the SAME id are serialized (queue order)', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         const cfg = makeConnectionConfig();
 
         const trace: string[] = [];
@@ -220,6 +249,7 @@ suite('ActorRegistry', () => {
         const fake = buildFakePool();
         const clearIntervalSpy = sinon.spy(global, 'clearInterval');
         const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
             poolFactory: fake.factory,
             refreshIntervalMs: 60_000,
         });
@@ -240,13 +270,17 @@ suite('ActorRegistry', () => {
 
     test('token refresh builds a new pool per generation', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const identity = makeDefaultIdentity();
+        const reg = new ActorRegistry({
+            identity,
+            poolFactory: fake.factory,
+        });
         await reg.connect('cfg-1', makeConnectionConfig());
         assert.strictEqual(fake.calls.length, 1);
         assert.strictEqual(fake.calls[0]?.token, 'tok-1');
 
         // Force a new token on the next getToken() call.
-        getIdentityProvider().clearCache();
+        identity.clearCache();
         __test__.setNextSession({
             id: 's2',
             accessToken: 'tok-2',
@@ -271,7 +305,10 @@ suite('ActorRegistry', () => {
 
     test('remove awaits socket cleanup before deleting the entry', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         await reg.connect('cfg-1', makeConnectionConfig());
 
         await reg.remove('cfg-1');
@@ -282,7 +319,10 @@ suite('ActorRegistry', () => {
 
     test('disconnectAll awaits every actor', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         await reg.connect('a', makeConnectionConfig({ id: 'a' }));
         await reg.connect('b', makeConnectionConfig({ id: 'b' }));
         await reg.connect('c', makeConnectionConfig({ id: 'c' }));
@@ -302,7 +342,7 @@ suite('ActorRegistry', () => {
     });
 
     test('executeQuery throws when the actor is missing', async () => {
-        const reg = new ActorRegistry();
+        const reg = new ActorRegistry({ identity: makeDefaultIdentity() });
         await assert.rejects(
             () => reg.executeQuery('never-connected', 'SELECT 1'),
             /No connection actor/
@@ -311,7 +351,10 @@ suite('ActorRegistry', () => {
 
     test('executeQuery throws when the actor is disconnected', async () => {
         const fake = buildFakePool();
-        const reg = new ActorRegistry({ poolFactory: fake.factory });
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+        });
         await reg.connect('cfg-1', makeConnectionConfig());
         await reg.disconnect('cfg-1');
 

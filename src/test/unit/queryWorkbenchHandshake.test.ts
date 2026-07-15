@@ -108,7 +108,14 @@ suite('QueryWorkbench handshake', () => {
                 },
                 end: fakeEnd as unknown as () => Promise<void>,
             });
-            const registry = new ActorRegistry({ poolFactory: factory });
+            const registry = new ActorRegistry({
+        identity: {
+            async getAccessToken(): Promise<string> {
+                return 'fake-token';
+            },
+        },
+        poolFactory: factory,
+    });
             const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
             await registry.connect('cfg-split', makeConnectionConfig({ id: 'cfg-split' }));
             const panel = QueryWorkbench.createOrShow(
@@ -141,7 +148,14 @@ suite('QueryWorkbench handshake', () => {
                 },
                 end: async () => undefined,
             });
-            const registry = new ActorRegistry({ poolFactory: factory });
+            const registry = new ActorRegistry({
+        identity: {
+            async getAccessToken(): Promise<string> {
+                return 'fake-token';
+            },
+        },
+        poolFactory: factory,
+    });
             const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
             await registry.connect('cfg-focused', makeConnectionConfig({ id: 'cfg-focused' }));
             QueryWorkbench.createOrShow(
@@ -183,7 +197,14 @@ suite('QueryWorkbench handshake', () => {
                 [{ id: 1 }, { id: 2 }],
                 [{ name: 'id' }]
             );
-            const connRegistry = new ActorRegistry({ poolFactory: fake.factory });
+            const connRegistry = new ActorRegistry({
+            identity: {
+                async getAccessToken(): Promise<string> {
+                    return 'fake-token';
+                },
+            },
+            poolFactory: fake.factory,
+        });
             const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
             const catalog = new GlobalStateConnectionCatalog(ctx);
             const { makeConnectionConfig } = await import('../factories/connectionConfig');
@@ -260,7 +281,14 @@ suite('QueryWorkbench handshake', () => {
                 [{ id: 1 }, { id: 2 }],
                 [{ name: 'id' }]
             );
-            const connRegistry = new ActorRegistry({ poolFactory: fake.factory });
+            const connRegistry = new ActorRegistry({
+            identity: {
+                async getAccessToken(): Promise<string> {
+                    return 'fake-token';
+                },
+            },
+            poolFactory: fake.factory,
+        });
             const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
             const catalog = new GlobalStateConnectionCatalog(ctx);
             const { makeConnectionConfig } = await import('../factories/connectionConfig');

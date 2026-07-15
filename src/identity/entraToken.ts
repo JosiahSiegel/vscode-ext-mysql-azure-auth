@@ -1,10 +1,10 @@
 /**
  * Compatibility facade. Wraps the well-supported `@azure/identity`
- * primitives behind the legacy `EntraTokenProvider` API that the existing
- * tests + extension code use.
+ * primitives behind the `EntraTokenProvider` API that the production
+ * extension code uses.
  *
- * New code should depend on `ChainedTokenCredential` directly. This module
- * exists to keep the regression net green during the rewrite.
+ * New code should depend on `ChainedTokenCredential` directly. This
+ * module exists to keep the regression net green.
  *
  * Scope:
  *   The Azure Database for MySQL Entra audience is
@@ -12,26 +12,20 @@
  *
  * Two factories are provided:
  *
- * - `new EntraTokenProvider(options?)` keeps the legacy 2-source chain
- *   shape (vscode -> azure cli) for the unit-test regression net. It does
+ * - `new EntraTokenProvider(options?)` keeps the 2-source chain shape
+ *   (vscode -> azure cli) for the unit-test regression net. It does
  *   not depend on MSAL or the device-code flow, so unit tests can run
  *   without network access.
  *
- * - `EntraTokenProvider.createInteractive(options)` is the production
- *   chain that always shows the user an authentication prompt when one is
- *   needed. The order is:
- *     1. DeviceCodeIdentitySource - drives the Entra device-code flow
- *        against Microsoft's Azure CLI public client ID. Always succeeds
- *        with a user-visible notification on a fresh install.
- *     2. VSCodeIdentitySource - uses any existing VS Code Microsoft
- *        sign-in. May return cached tokens without re-prompting.
- *     3. AzureCliCredential - falls back to a previously-running
- *        `az login` session, with a bounded `processTimeoutInMs` so a
- *        stalled `az` invocation does not pin the chain.
+ * - `EntraTokenProvider.createInteractive({ log })` is the production
+ *   chain. It composes the same vscode -> azure cli shape; consumers
+ *   that need an identity before construction should build one with
+ *   `new EntraTokenProvider(...)` and pass it via the registry.
  *
- * All sources implement `@azure/identity`'s `TokenCredential`. The official
- * `ChainedTokenCredential` orchestrates the fallback (advancing on
- * `CredentialUnavailableError` / `AuthenticationRequiredError`).
+ * All sources implement `@azure/identity`'s `TokenCredential`. The
+ * official `ChainedTokenCredential` orchestrates the fallback
+ * (advancing on `CredentialUnavailableError` /
+ * `AuthenticationRequiredError`).
  *
  * Caching: `CachedIdentityProvider` wraps each chain and honours each
  * `AccessToken.expiresOnTimestamp`.
@@ -42,12 +36,7 @@ import {
     ChainedTokenCredential,
 } from '@azure/identity';
 import type { TokenCredential, GetTokenOptions, AccessToken } from '@azure/core-auth';
-import * as vscode from 'vscode';
-import {
-    DeviceCodeIdentitySource,
-    VSCodeIdentitySource,
-    type DeviceCodePrompt,
-} from './vscodeAuth';
+import { VSCodeIdentitySource } from './vscodeAuth';
 
 export const AZURE_MYSQL_ENTRA_SCOPE = 'https://ossrdbms-aad.database.windows.net/.default';
 
@@ -88,24 +77,6 @@ export class CachedIdentityProvider implements TokenCredential {
     clearCache(): void {
         this.cache = undefined;
     }
-}
-
-let defaultProvider: EntraTokenProvider | undefined;
-
-/**
- * @deprecated Use composition-root injection. Kept for the existing test
- * net that imports this symbol directly.
- */
-export function getIdentityProvider(): EntraTokenProvider {
-    if (!defaultProvider) {
-        defaultProvider = new EntraTokenProvider();
-    }
-    return defaultProvider;
-}
-
-/** Reset the cached default provider. Used by tests in setup/teardown. */
-export function resetDefaultIdentityProvider(): void {
-    defaultProvider = undefined;
 }
 
 /** A function that receives identity-related diagnostic messages. */
@@ -160,14 +131,11 @@ export interface EntraTokenProviderOptions {
     primary?: TokenCredential;
     /** Fallback after `primary` throws CredentialUnavailableError / AuthenticationRequiredError. Default: `AzureCliCredential`. */
     fallback?: TokenCredential;
-    /** Adapter for the device-code prompt UI. Only used by `createInteractive`. */
-    prompt?: DeviceCodePrompt;
     /** Sink for credential-level tracing lines. */
     log?: IdentityLog;
 }
 
 export interface InteractiveIdentityOptions {
-    prompt?: DeviceCodePrompt;
     log?: IdentityLog;
 }
 
@@ -178,13 +146,7 @@ export interface InteractiveIdentityOptions {
  * The default constructor builds a 2-source chain:
  *   vscode -> azure cli
  *
- * `createInteractive` builds the same chain by default. To also try a
- * device-code sign-in (e.g. for fresh installs without any cached
- * Microsoft auth), supply `{ deviceCodePrompt }`. The device-code source
- * is OFF by default because Microsoft's Azure CLI public client ID is not
- * authorized for `ossrdbms-aad` in every cloud environment — when it is,
- * the chain wastes ~500 ms round-tripping before advancing to the VS Code
- * source.
+ * `createInteractive` builds the same chain for the production host.
  */
 export class EntraTokenProvider {
     protected readonly cached: CachedIdentityProvider;
@@ -207,39 +169,12 @@ export class EntraTokenProvider {
     }
 
     /**
-     * Build the production chain. By default, the chain is:
-     *   vscode -> azure cli
-     *
-     * Pass `deviceCodePrompt` to prepend a device-code source that surfaces
-     * an interactive sign-in flow. Most users do not need this — VS Code's
-     * built-in Microsoft auth provider handles `ossrdbms-aad` reliably.
+     * Build the production chain. Always vscode -> azure cli.
      */
     static createInteractive(
-        options: InteractiveIdentityOptions & {
-            deviceCodePrompt?: DeviceCodePrompt;
-        } = {}
+        options: InteractiveIdentityOptions = {}
     ): EntraTokenProvider {
-        const log = options?.log ?? passthroughLog;
-        const fallback = new TracingCredential(
-            new AzureCliCredential({ processTimeoutInMs: AZURE_CLI_TIMEOUT_MS }),
-            'azureCli',
-            log
-        );
-        const vscodeCred = new TracingCredential(new VSCodeIdentitySource(), 'vscode', log);
-        const sources: TokenCredential[] = [];
-        if (options.deviceCodePrompt) {
-            sources.push(
-                new TracingCredential(
-                    new DeviceCodeIdentitySource(options.deviceCodePrompt),
-                    'deviceCode',
-                    log
-                )
-            );
-        }
-        sources.push(vscodeCred, fallback);
-        const chain = new ChainedTokenCredential(...sources);
-        const cached = new CachedIdentityProvider(chain);
-        return new InteractiveEntraTokenProvider(chain, cached);
+        return new EntraTokenProvider(options);
     }
 
     /**
@@ -259,57 +194,4 @@ export class EntraTokenProvider {
     clearCache(): void {
         this.cached.clearCache();
     }
-}
-
-/**
- * Concrete `EntraTokenProvider` that exposes a constructor accepting an
- * already-built chain. Used by the static `createInteractive` factory.
- */
-class InteractiveEntraTokenProvider extends EntraTokenProvider {
-    constructor(chain: ChainedTokenCredential, cached: CachedIdentityProvider) {
-        super({ primary: new VSCodeIdentitySource() });
-        // Replace the superclass defaults with the explicit interactive chain.
-        (this as unknown as { chain: ChainedTokenCredential }).chain = chain;
-        (this as unknown as { cached: CachedIdentityProvider }).cached = cached;
-    }
-}
-
-/**
- * The default UI for the device-code flow: an information notification with
- * an "Open Browser" action. The notification remains visible until the
- * user dismisses it or the flow completes.
- *
- * `vscode.env.openExternal` returns a `Thenable<boolean>` that resolves to
- * `false` when no registered handler exists for the URL scheme. We surface
- * that as a clear error message and fall back to copying the URL to the
- * clipboard so the user can paste it manually — this is the common Windows
- * failure mode where the default browser shell association is broken.
- */
-function defaultDeviceCodePrompt(): DeviceCodePrompt {
-    return (info, _cancel) => {
-        void vscode.window
-            .showInformationMessage(
-                `Sign in required. Visit ${info.verificationUri} and enter code ${info.userCode} to continue.`,
-                'Open Browser',
-                'Copy URL'
-            )
-            .then(async (choice: string | undefined) => {
-                if (choice === 'Open Browser') {
-                    const uri = vscode.Uri.parse(info.verificationUri);
-                    const opened = await vscode.env.openExternal(uri);
-                    if (!opened) {
-                        // No registered handler for `https://` on Windows
-                        // typically surfaces as "Cannot find file specified".
-                        await vscode.env.clipboard.writeText(info.verificationUri);
-                        void vscode.window.showWarningMessage(
-                            `Could not open ${info.verificationUri} automatically. ` +
-                                `The URL has been copied to your clipboard; paste it into a browser, then enter code ${info.userCode}.`
-                        );
-                    }
-                } else if (choice === 'Copy URL') {
-                    await vscode.env.clipboard.writeText(info.verificationUri);
-                }
-            });
-        return undefined;
-    };
 }

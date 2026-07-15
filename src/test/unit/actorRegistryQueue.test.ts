@@ -70,6 +70,19 @@ const baseConfig = {
     ssl: true,
 };
 
+/**
+ * Stub identity source. The queue tests focus on per-id serialization
+ * inside `ActorRegistry`; they never reach the actual credential chain,
+ * so a constant-token identity is enough.
+ */
+function fakeIdentity(): { readonly getAccessToken: () => Promise<string> } {
+    return {
+        async getAccessToken(): Promise<string> {
+            return 'fake-token';
+        },
+    };
+}
+
 suite('ActorRegistry query serialization', () => {
     test('two same-id queries run FIFO through the actor queue', async () => {
         const d1 = deferred();
@@ -78,7 +91,7 @@ suite('ActorRegistry query serialization', () => {
             ['Q1', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
             ['Q2', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
         ]));
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
 
         const order: string[] = [];
@@ -111,7 +124,7 @@ suite('ActorRegistry query serialization', () => {
             execute: fakeExecute as unknown as PoolLike['execute'],
             end: fakeEnd as unknown as () => Promise<void>,
         });
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
 
         const errorResult = await reg.executeQuery(baseConfig.id, 'BAD');
@@ -131,7 +144,7 @@ suite('ActorRegistry query serialization', () => {
             ['A.', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
             ['B.', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
         ]));
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         const cfgA = { ...baseConfig, id: 'cfg-A', name: 'A' };
         const cfgB = { ...baseConfig, id: 'cfg-B', name: 'B' };
         await reg.connect(cfgA.id, cfgA);
@@ -154,7 +167,7 @@ suite('ActorRegistry query serialization', () => {
 
     test('executeQuery throws when the actor is missing', async () => {
         const { factory } = buildDeferredPool(new Map());
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await assert.rejects(
             () => reg.executeQuery('nonexistent', 'SELECT 1'),
             /no connection actor/i
@@ -163,7 +176,7 @@ suite('ActorRegistry query serialization', () => {
 
     test('executeQuery throws when the connection is disconnected', async () => {
         const { factory } = buildDeferredPool(new Map());
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
         await reg.disconnect(baseConfig.id);
         await assert.rejects(
@@ -187,7 +200,7 @@ suite('ActorRegistry query serialization', () => {
             execute: fakeExecute as unknown as PoolLike['execute'],
             end: fakeEnd as unknown as () => Promise<void>,
         });
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
 
         const [dbs, tables, cols] = await Promise.all([
@@ -205,7 +218,7 @@ suite('ActorRegistry query serialization', () => {
         const { factory, calls } = buildDeferredPool(new Map([
             ['SELECT 1', { rows: [{ v: 1 }], fields: [{ name: 'v' }] }],
         ]));
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, { ...baseConfig, readOnly: true });
         await reg.executeQuery(baseConfig.id, 'SELECT 1');
 
@@ -227,7 +240,7 @@ suite('ActorRegistry query serialization', () => {
                 end: fakeEnd as unknown as () => Promise<void>,
             };
         };
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, { ...baseConfig, readOnly: false });
         await reg.executeQuery(baseConfig.id, 'SELECT 1');
         assert.strictEqual(observedReadOnly, undefined, 'readOnly: false must propagate as absent to the session');
@@ -235,7 +248,7 @@ suite('ActorRegistry query serialization', () => {
 
     test('getConfig returns the latest known ConnectionConfig for an id', async () => {
         const { factory } = buildDeferredPool(new Map());
-        const reg = new ActorRegistry({ poolFactory: factory });
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         // Pre-connect: no actor -> undefined.
         assert.strictEqual(reg.getConfig('never-seen'), undefined);
 

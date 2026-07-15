@@ -38,12 +38,6 @@ const VALID_TCP_PORT_MIN = 1;
 const VALID_TCP_PORT_MAX = 65535;
 const TLS_ITEMS = ['Encrypt (recommended)', 'Plaintext'] as const;
 
-/**
- * Enables additive validation summaries for form hosts that opt in. It is
- * disabled by default to preserve the established fail-fast wizard contract.
- */
-export const validationSummaryMode = false;
-
 export function isValidTcpPort(value: number): boolean {
     return (
         Number.isInteger(value) &&
@@ -140,9 +134,9 @@ export async function resolveSsl(
  * Azure FQDN shape; label copy suggests `prod`, `stage`, and `dev` suffixes.
  *
  * `FormPrompts` deliberately remains the three-method compatibility contract.
- * A future prompt adapter may accept `suggestions?: readonly string[]`, and
- * `validationSummaryMode` reserves opt-in aggregate validation; both are no-ops
- * here. Database selection remains free-text so TLS stays the first quick-pick.
+ * A future prompt adapter may accept `suggestions?: readonly string[]`; this
+ * is a forward-compatible no-op. Database selection remains free-text so TLS
+ * stays the first quick-pick.
  */
 export async function collectNewServer(
     sinks: FormPrompts,
@@ -219,9 +213,9 @@ export async function collectNewServer(
  * Submitted strings are kept literal and the port is validated directly.
  * Host and label copy retain the modern endpoint/group hints.
  *
- * The optional `suggestions?: readonly string[]` prompt evolution and aggregate
- * `validationSummaryMode` are forward-compatible no-ops. Database stays
- * free-text, and dismissing TLS preserves the existing encryption choice.
+ * The optional `suggestions?: readonly string[]` prompt evolution is a
+ * forward-compatible no-op. Database stays free-text, and dismissing TLS
+ * preserves the existing encryption choice.
  *
  * On edit, the Azure plaintext block is absolute: the user is bounced back
  * to TLS without saving. Otherwise the resolved ssl matches the existing

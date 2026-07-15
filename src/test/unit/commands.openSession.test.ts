@@ -126,7 +126,7 @@ suite('openSession (regression: azure-account.login)', () => {
         const identity = new EntraTokenProvider();
         sandbox.stub(identity, 'isSignedIn').resolves(true);
         sandbox.stub(identity, 'getAccessToken').resolves('token');
-        const registry = new ActorRegistry({ poolFactory: buildFakePool() });
+        const registry = new ActorRegistry({ identity, poolFactory: buildFakePool() });
         const connectStarted = deferred<void>();
         const connectGate = deferred<void>();
         const connect = sandbox.stub(registry, 'connect').callsFake(() => {
@@ -153,7 +153,7 @@ suite('openSession (regression: azure-account.login)', () => {
         const identity = new EntraTokenProvider();
         sandbox.stub(identity, 'isSignedIn').resolves(true);
         sandbox.stub(identity, 'getAccessToken').resolves('token');
-        const registry = new ActorRegistry({ poolFactory: buildFakePool() });
+        const registry = new ActorRegistry({ identity, poolFactory: buildFakePool() });
         const firstConnectStarted = deferred<void>();
         const firstConnect = deferred<void>();
         const connect = sandbox.stub(registry, 'connect');
@@ -188,7 +188,7 @@ suite('openSession (regression: azure-account.login)', () => {
             callOrder.push('identity.getAccessToken');
             return 'token';
         });
-        const registry = new ActorRegistry({ poolFactory: buildFakePool() });
+        const registry = new ActorRegistry({ identity, poolFactory: buildFakePool() });
         sandbox.stub(registry, 'connect').callsFake(async () => {
             callOrder.push('registry.connect');
         });

@@ -17,11 +17,9 @@ import { __test__ } from '../mocks/vscode';
 import {
     EntraTokenProvider,
     CachedIdentityProvider,
-    resetDefaultIdentityProvider,
     AZURE_MYSQL_ENTRA_SCOPE,
 } from '../../identity/entraToken';
 import { VSCodeIdentitySource } from '../../identity/vscodeAuth';
-import { DeviceCodeIdentitySource } from '../../identity/vscodeAuth';
 import type { TokenCredential, AccessToken } from '@azure/core-auth';
 import type { DeviceCodeInfo, DeviceCodePromptCallback } from '@azure/identity';
 
@@ -81,13 +79,11 @@ function deviceCodeLikeCredential(
 
 suite('EntraTokenProvider facade', () => {
     setup(() => {
-        resetDefaultIdentityProvider();
         __test__.reset();
         __test__.resetAuth();
     });
 
     teardown(() => {
-        resetDefaultIdentityProvider();
         __test__.reset();
         __test__.resetAuth();
     });
@@ -271,13 +267,11 @@ suite('EntraTokenProvider facade', () => {
 
 suite('EntraTokenProvider.createInteractive (production chain)', () => {
     setup(() => {
-        resetDefaultIdentityProvider();
         __test__.reset();
         __test__.resetAuth();
     });
 
     teardown(() => {
-        resetDefaultIdentityProvider();
         __test__.reset();
         __test__.resetAuth();
     });
@@ -365,43 +359,11 @@ suite('EntraTokenProvider.createInteractive (production chain)', () => {
     });
 });
 
-suite('DeviceCodeIdentitySource error reporting', () => {
-    test('non-credential-unavailable error from underlying credential is wrapped as AuthenticationRequiredError', async () => {
-        // The underlying MSALDeviceCode emits a typical MSAL-shaped error.
-        // We hit it through DeviceCodeIdentitySource and verify it produces
-        // an AuthenticationRequiredError so the chain keeps advancing.
-        const source = new DeviceCodeIdentitySource(() => undefined);
-        // Inject a failing getToken by stubbing the inner credential.
-        const inner = (source as unknown as {
-            credential: { getToken: () => Promise<never> };
-        }).credential;
-        const original = inner.getToken;
-        inner.getToken = async () => {
-            const err = new Error('Network error: connect ECONNREFUSED') as Error & {
-                statusCode?: number;
-                errorCode?: string;
-            };
-            err.statusCode = 0;
-            err.errorCode = 'network_error';
-            throw err;
-        };
-        try {
-            await assert.rejects(
-                () =>
-                    source.getToken([AZURE_MYSQL_ENTRA_SCOPE]),
-                (err: unknown) => {
-                    return (
-                        err instanceof Error &&
-                        err.name === 'AuthenticationRequiredError' &&
-                        err.message.includes('Device code flow failed')
-                    );
-                }
-            );
-        } finally {
-            inner.getToken = original;
-        }
-    });
-});
+// Note: the device-code credential class was retired in Todo 8 because
+// no production caller ever wires the device-code prompt into
+// `createInteractive`. Its dedicated suite was removed; the behavior is
+// instead covered indirectly through the chained-token "advances on
+// CredentialUnavailableError" suites above.
 
 function makeVSCodeCancelledError(): Error {
     const err = new Error('User cancelled') as Error & { code?: string };

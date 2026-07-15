@@ -97,7 +97,14 @@ async function connectAndCreate(
 ) {
     const { GlobalStateConnectionCatalog } = await import('../../registry/connectionCatalog');
     const { makeConnectionConfig } = await import('../factories/connectionConfig');
-    const connRegistry = new ActorRegistry({ poolFactory: factory });
+    const connRegistry = new ActorRegistry({
+        identity: {
+            async getAccessToken(): Promise<string> {
+                return 'fake-token';
+            },
+        },
+        poolFactory: factory,
+    });
     const catalog = new GlobalStateConnectionCatalog(ctx);
     await catalog.add(makeConnectionConfig({ id: config.id, name: config.name }));
     await connRegistry.connect(config.id, makeConnectionConfig({ id: config.id, name: config.name }));

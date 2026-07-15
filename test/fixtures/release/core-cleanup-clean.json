@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "case": "clean",
+  "description": "Clean: no ConnectionHandle / LifecycleRegistry / legacyWire / DeviceCodeIdentitySource / defaultProvider / advanceClock / validationSummaryMode references remain in src/, the registry's identity field accepts composition-root injection, and the manifest still carries no revived createTable / editRows / servers / connectionColors settings, no onLanguage:* / workspaceContains:* activation events, no `mysqlAzureAuth.createTable` command. The regression smoke for the public surface stays green."
+}

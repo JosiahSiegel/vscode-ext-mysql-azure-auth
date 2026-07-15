@@ -24,8 +24,8 @@ import {
     type DatabaseSessionConfig,
     type PoolFactory,
 } from './databaseSession';
-import { getIdentityProvider } from '../identity/entraToken';
-import { toLegacyQueryResult } from './legacyWire';
+import { EntraTokenProvider } from '../identity/entraToken';
+import { toLegacyQueryResult } from '../domain';
 import type {
     ConnectionConfig,
     QueryResult,
@@ -41,7 +41,12 @@ export type ConnectionState =
     | { readonly tag: 'failed'; readonly message: string };
 
 export interface RegistryOptions {
-    /** Identity source shared by initial connection and token refresh. */
+    /** Identity source shared by initial connection and token refresh.
+     * Composition-root callers construct an `EntraTokenProvider` and
+     * inject it here. Tests inject a stub. When omitted, a fresh
+     * `EntraTokenProvider` (vscode -> azure cli) is built per
+     * ActorRegistry instance so the registry never depends on a global
+     * singleton. */
     identity?: { readonly getAccessToken: () => Promise<string> };
     /** Default refresh interval in ms. Default: 45 minutes. */
     refreshIntervalMs?: number;
@@ -84,7 +89,7 @@ export class ActorRegistry {
     private readonly defaultPoolFactory: PoolFactory | undefined;
 
     constructor(options: RegistryOptions = {}) {
-        this.identity = options.identity ?? getIdentityProvider();
+        this.identity = options.identity ?? new EntraTokenProvider();
         this.defaultRefreshMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_MS;
         this.tokenAcquisitionTimeoutMs =
             options.tokenAcquisitionTimeoutMs ?? DEFAULT_TOKEN_ACQUISITION_TIMEOUT_MS;
@@ -221,20 +226,6 @@ export class ActorRegistry {
             if (this.isConnected(id)) out.push(actor.config);
         }
         return out;
-    }
-
-    /**
-     * Advance fake-clock time for testing. Triggers pending token refreshes
-     * that are due. Returns the number of refreshes actually fired.
-     *
-     * Production code uses real setInterval; tests can swap it out via the
-     * `setIntervalFactory` option.
-     */
-    async advanceClock(ms: number): Promise<number> {
-        // Implementation detail of the registry: real production uses
-        // setInterval, so this method only exists when the registry was
-        // built with a fake scheduler. Tests inject via `schedulerFactory`.
-        throw new Error('advanceClock is only available when a schedulerFactory is configured');
     }
 
     // ---------- private implementation ----------

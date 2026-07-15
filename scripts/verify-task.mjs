@@ -1233,6 +1233,182 @@ if (!invokedDirectly) {
       }
     }
   }
+} else if (task === "8") {
+  /* Todo 8 — retire inactive identity and legacy lifecycle surfaces.
+   *
+   * After this todo lands, the following dead surfaces must be absent
+   * from src/:
+   *   - ConnectionHandle / LifecycleRegistry (the legacy compatibility
+   *     facade)
+   *   - legacyWire (the QueryOutcome -> QueryResult re-export module)
+   *   - DeviceCodeIdentitySource / DeviceCodePrompt (the unused device-
+   *     code source class and its prompt callback type)
+   *   - defaultProvider / getIdentityProvider / resetDefaultIdentityProvider
+   *     (the deprecated identity singleton)
+   *   - advanceClock (the throwing scheduler stub)
+   *   - validationSummaryMode (the no-op form flag)
+   *
+   * The regression smoke re-runs the previous-todo grep gates so the
+   * manifest surface stays clean (no createTable / editRows /
+   * servers / connectionColors settings, no onLanguage:* /
+   * workspaceContains:* activation events).
+   *
+   * The validator exposes a `legacyLeakSource` fixture field so a
+   * negative fixture can inject a synthetic scoped source blob (with
+   * a `ConnectionHandle` import) into a temp file under
+   * .omo/evidence/. The validator greps that temp file and emits
+   * CORE CLEANUP NOT READY: LEGACY_REMNANT if any deleted symbol
+   * shows up. The clean fixture omits `legacyLeakSource`, so the
+   * gate reduces to a no-op for the leak branch.
+   */
+  const CORE_CLEANUP_DELETED_PATTERNS = [
+    "ConnectionHandle",
+    "LifecycleRegistry",
+    "legacyWire",
+    "DeviceCodeIdentitySource",
+    "defaultProvider",
+    "advanceClock",
+    "validationSummaryMode",
+  ];
+  const CORE_CLEANUP_SCOPED_SOURCE_BASENAME =
+    "task-8-core-cleanup-scoped-source.ts";
+  const CORE_CLEANUP_SCOPED_SOURCE_PATH = resolve(
+    process.cwd(),
+    ".omo/evidence",
+    CORE_CLEANUP_SCOPED_SOURCE_BASENAME,
+  );
+  const CORE_CLEANUP_CASES = new Set(["clean", "legacy-leak"]);
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("CORE CLEANUP NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let fixture = null;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("CORE CLEANUP NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixture) {
+      if (
+        !isPlainObject(fixture) ||
+        fixture.schemaVersion !== 1 ||
+        typeof fixture.case !== "string" ||
+        !CORE_CLEANUP_CASES.has(fixture.case)
+      ) {
+        console.error("CORE CLEANUP NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else if (
+        fixture.legacyLeakSource !== undefined &&
+        typeof fixture.legacyLeakSource !== "string"
+      ) {
+        console.error("CORE CLEANUP NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else {
+        let failureCode = null;
+
+        // (a) Run the live deletion-grep gate over src/. Every deleted
+        //     symbol must be absent. We use the Node `child_process` to
+        //     invoke `git grep` because that exact command is what the
+        //     task body documents; using a regex over the source files
+        //     would also work but the task spec asks for the git grep
+        //     pipeline specifically.
+        try {
+          const { spawnSync } = await import("node:child_process");
+          const pattern = CORE_CLEANUP_DELETED_PATTERNS.join("|");
+          const run = spawnSync(
+            "git",
+            ["grep", "-nE", pattern, "src/"],
+            { cwd: process.cwd(), encoding: "utf8" },
+          );
+          // git grep returns exit 1 when no matches exist. Treat 1 as
+          // success (zero hits). Any other non-zero exit code is a real
+          // failure (e.g. git not found).
+          if (run.status !== 0 && run.status !== 1) {
+            failureCode = "GIT_GREP_FAIL";
+          } else if (run.stdout && run.stdout.trim().length > 0) {
+            failureCode = "LEGACY_REMNANT";
+          }
+        } catch {
+          failureCode = "GIT_GREP_FAIL";
+        }
+
+        // (b) When the fixture supplies a `legacyLeakSource` blob,
+        //     materialise it as a scoped temp file and grep that file
+        //     for the deleted symbols. The temp file lives under
+        //     .omo/evidence/ so the validator never has to mutate the
+        //     production tree.
+        if (!failureCode && typeof fixture.legacyLeakSource === "string") {
+          try {
+            const { writeFile, unlink } = await import("node:fs/promises");
+            const { mkdir } = await import("node:fs/promises");
+            await mkdir(resolve(process.cwd(), ".omo/evidence"), { recursive: true });
+            await writeFile(CORE_CLEANUP_SCOPED_SOURCE_PATH, fixture.legacyLeakSource, "utf8");
+            try {
+              const scopedSource = await readFile(
+                CORE_CLEANUP_SCOPED_SOURCE_PATH,
+                "utf8",
+              );
+              for (const token of CORE_CLEANUP_DELETED_PATTERNS) {
+                if (scopedSource.includes(token)) {
+                  failureCode = "LEGACY_REMNANT";
+                  break;
+                }
+              }
+            } finally {
+              try {
+                await unlink(CORE_CLEANUP_SCOPED_SOURCE_PATH);
+              } catch {
+                // Best-effort cleanup; the leak blob is discarded after
+                // the gate fires so the temp file never lingers.
+              }
+            }
+          } catch {
+            failureCode = "FIXTURE_INVALID";
+          }
+        }
+
+        // (c) Manifest-regression smoke. The task body explicitly
+        //     requires this grep to stay empty so that no removed
+        //     manifest surface from Todo 6 / Todo 7 is reintroduced
+        //     while we're moving the identity / registry code around.
+        //     Word boundaries keep the live `mysqlAzureAuth.serversView`
+        //     view ID from tripping the smoke gate.
+        if (!failureCode) {
+          try {
+            const { spawnSync } = await import("node:child_process");
+            const run = spawnSync(
+              "git",
+              [
+                "grep",
+                "-nE",
+                "\\bmysqlAzureAuth\\.createTable\\b|\\bmysqlAzureAuth\\.editRows\\b|\\bmysqlAzureAuth\\.servers\\b|\\bmysqlAzureAuth\\.connectionColors\\b|\\bonLanguage:sql\\b|\\bonLanguage:mysql\\b|\\bworkspaceContains:",
+                "package.json",
+              ],
+              { cwd: process.cwd(), encoding: "utf8" },
+            );
+            if (run.status !== 0 && run.status !== 1) {
+              failureCode = "MANIFEST_REGRESSION";
+            } else if (run.stdout && run.stdout.trim().length > 0) {
+              failureCode = "MANIFEST_REGRESSION";
+            }
+          } catch {
+            failureCode = "MANIFEST_REGRESSION";
+          }
+        }
+
+        if (failureCode) {
+          console.log(`CORE CLEANUP NOT READY: ${failureCode}`);
+          process.exitCode = 1;
+        } else {
+          console.log("CORE CLEANUP READY");
+        }
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "legacy-leak",
+  "description": "Negative fixture: the validator inspects `legacyLeakSource` as a scoped temp source. The injected blob contains a deliberate `ConnectionHandle` import statement that the validator's grep gate MUST catch, exercising the CORE CLEANUP NOT READY: LEGACY_REMNANT branch without polluting the production tree.",
+  "legacyLeakSource": "// Synthetic scoped source for Todo 8 validator.\n// The validator writes this blob to a temp file under .omo/evidence/ and\n// greps it for any of the deleted-symbol patterns. The presence of\n// `import { ConnectionHandle }` below MUST trigger LEGACY_REMNANT.\nimport { ConnectionHandle } from '../../registry/connectionLifecycle';\nimport { LifecycleRegistry } from '../../registry/connectionLifecycle';\nimport { toLegacyQueryResult } from '../../registry/legacyWire';\nimport { DeviceCodeIdentitySource } from '../../identity/vscodeAuth';\nexport const fixture = { ConnectionHandle, LifecycleRegistry, toLegacyQueryResult, DeviceCodeIdentitySource };\n"
+}

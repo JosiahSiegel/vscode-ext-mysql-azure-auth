@@ -157,17 +157,10 @@ export function activate(context: vscode.ExtensionContext): void {
             }
         ),
         cmd.registerCommand(
-            'mysqlAzureAuth.editRows',
+            'mysqlAzureAuth.viewMoreRows',
             (node?: TableNodeLike) => {
                 if (!node) return;
-                return editRows(context, catalog, registry, node);
-            }
-        ),
-        cmd.registerCommand(
-            'mysqlAzureAuth.createTable',
-            (node?: ServerNodeLike) => {
-                if (!node) return;
-                return createTable(registry, node.config);
+                return viewMoreRows(context, catalog, registry, node);
             }
         ),
         cmd.registerCommand(
@@ -434,7 +427,7 @@ async function previewRows(
     await panel.executeQuery(sql);
 }
 
-async function editRows(
+async function viewMoreRows(
     context: vscode.ExtensionContext,
     catalog: GlobalStateConnectionCatalog,
     registry: ActorRegistry,
@@ -461,35 +454,4 @@ function buildTableSelect(node: TableNodeLike, limit: number): string {
         return `SELECT * FROM \`${db}\`.\`${table}\` LIMIT ${limit};`;
     }
     return `SELECT * FROM \`${table}\` LIMIT ${limit};`;
-}
-
-async function createTable(
-    registry: ActorRegistry,
-    config: ConnectionConfig
-): Promise<void> {
-    if (!registry.isConnected(config.id)) {
-        vscode.window.showErrorMessage('Connect to the server before creating tables');
-        return;
-    }
-    const tableName = await vscode.window.showInputBox({
-        prompt: 'New table name',
-        placeHolder: 'e.g. customer_2024',
-    });
-    if (!tableName) return;
-    const escapedTableName = escapeSqlIdentifier(tableName);
-    const confirm = await vscode.window.showWarningMessage(
-        `Run CREATE TABLE \`${escapedTableName}\` on ${config.name}?`,
-        { modal: true },
-        'Run'
-    );
-    if (confirm !== 'Run') return;
-    const result = await registry.executeQuery(
-        config.id,
-        `CREATE TABLE \`${escapedTableName}\` (id INT AUTO_INCREMENT PRIMARY KEY)`
-    );
-    if (result.error) {
-        vscode.window.showErrorMessage(`Failed: ${result.error}`);
-    } else {
-        vscode.window.showInformationMessage(`Table "${tableName}" created`);
-    }
 }

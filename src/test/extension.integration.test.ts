@@ -60,8 +60,7 @@ suite('Extension integration', () => {
             'mysqlAzureAuth.openWorkbench',
             'mysqlAzureAuth.refreshAll',
             'mysqlAzureAuth.previewRows',
-            'mysqlAzureAuth.editRows',
-            'mysqlAzureAuth.createTable',
+            'mysqlAzureAuth.viewMoreRows',
         ];
 
         const missing = expected.filter((cmd) => !registered.includes(cmd));

@@ -932,6 +932,106 @@ if (!invokedDirectly) {
       console.log("PRIVACY READY");
     }
   }
+} else if (task === "6") {
+  /* Todo 6 — table-action public surface: createTable removed and
+   * editRows renamed to viewMoreRows at both the manifest AND the
+   * runtime handler layer. The contract fixture carries an optional
+   * `runtimeFixtureSource` blob so a leak fixture can inject a malicious
+   * `src/main.ts` body for the EDIT_RUNTIME_REMNANT branch without
+   * mutating the production tree. */
+  const RUNTIME_SOURCE_PATH = "src/main.ts";
+  const RUNTIME_VALID_CASES = new Set(["valid", "editRows-leak"]);
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("SURFACE NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let fixture = null;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("SURFACE NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixture) {
+      if (!isPlainObject(fixture) || fixture.schemaVersion !== 1 || typeof fixture.case !== "string" || !RUNTIME_VALID_CASES.has(fixture.case)) {
+        console.error("SURFACE NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else if (fixture.runtimeFixtureSource !== undefined && typeof fixture.runtimeFixtureSource !== "string") {
+        console.error("SURFACE NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else {
+        const runtimeSource = typeof fixture.runtimeFixtureSource === "string"
+          ? fixture.runtimeFixtureSource
+          : (await fileExists(RUNTIME_SOURCE_PATH)
+              ? await readFile(resolve(process.cwd(), RUNTIME_SOURCE_PATH), "utf8")
+              : "");
+
+        // (a) Detect any registered command whose first argument still says
+        //     `mysqlAzureAuth.editRows`. The hand-rolled regex accepts the
+        //     exact shape `vscode.commands.registerCommand('...',` or
+        //     `cmd.registerCommand('...',` so we stay tolerant of the
+        //     local alias the production code uses.
+        const registerCallPattern = /(?:vscode\.commands|cmd)\.registerCommand\(\s*(['"])([^'"]+)\1/g;
+        const editRowsRemnants = [];
+        const createTableRemnants = [];
+        let match;
+        while ((match = registerCallPattern.exec(runtimeSource)) !== null) {
+          const id = match[2];
+          if (id === "mysqlAzureAuth.editRows") {
+            editRowsRemnants.push(id);
+          }
+          if (id === "mysqlAzureAuth.createTable") {
+            createTableRemnants.push(id);
+          }
+        }
+
+        // (b) Surface contract sanity: live manifest still satisfies the
+        //     Todo 2 contract when this validator runs. We re-use the
+        //     release-contract fixture from Todo 2 and run a light check
+        //     that is independent of the apply/diff machinery so the
+        //     regression gate in the task body holds.
+        let manifest = null;
+        try {
+          manifest = await loadJson("package.json");
+        } catch {
+          console.error("SURFACE NOT READY: MANIFEST_MISSING");
+          process.exitCode = 1;
+        }
+
+        const descriptionOk = manifest && typeof manifest.description === "string"
+          && manifest.description === PRODUCT_SENTENCE;
+        const commands = Array.isArray(manifest?.contributes?.commands)
+          ? manifest.contributes.commands
+              .map((c) => (isPlainObject(c) && isString(c.command) ? c.command : null))
+              .filter((v) => v !== null)
+          : [];
+        const viewMoreTitle = Array.isArray(manifest?.contributes?.commands)
+          ? manifest.contributes.commands.find((c) => isPlainObject(c) && c.command === "mysqlAzureAuth.viewMoreRows")
+          : undefined;
+        const titleOk = viewMoreTitle && viewMoreTitle.title === "View More Rows";
+        const editRowsMissingFromManifest = !commands.includes("mysqlAzureAuth.editRows");
+        const createTableMissingFromManifest = !commands.includes("mysqlAzureAuth.createTable");
+
+        if (!manifest) {
+          // exit code already set above
+        } else if (editRowsRemnants.length > 0) {
+          console.log("SURFACE NOT READY: EDIT_RUNTIME_REMNANT");
+          process.exitCode = 1;
+        } else if (createTableRemnants.length > 0) {
+          console.log("SURFACE NOT READY: CREATE_TABLE_RUNTIME_REMNANT");
+          process.exitCode = 1;
+        } else if (!descriptionOk || !titleOk || !editRowsMissingFromManifest || !createTableMissingFromManifest) {
+          console.log("SURFACE NOT READY: CONTRACT_REGRESSION");
+          process.exitCode = 1;
+        } else {
+          console.log("SURFACE READY");
+        }
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

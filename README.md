@@ -15,7 +15,6 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 - **Server sidebar** — Servers view in the Activity Bar shows every registered endpoint with its live/idle state. Click to expand and walk tables.
 - **Query workbench** — opens a webview per server. Run SQL, see results in a table, export to CSV or JSON.
 - **Preview table rows** — right-click a table to preview 100 rows or view up to 1,000 rows with `SELECT * FROM ... LIMIT N`; this is read-only browsing, not row editing.
-- **Schema-aware new-table wizard** — `mysqlAzureAuth.createTable` prompts for a name and asks for confirmation before issuing DDL.
 - **Strict input validation** — ports are bounds-checked at the wizard boundary; dismissed TLS picker is never silent.
 - **Typed everywhere** — the public surface is pinned by `src/test/unit/publicSurface.test.ts`. Any drift to the manifest fails CI.
 

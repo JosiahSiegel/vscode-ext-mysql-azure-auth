@@ -33,7 +33,7 @@ suite('Public surface lock', () => {
         assert.strictEqual(pkg.main, './out/main.js');
     });
 
-    test('all 10 command IDs and their categories are preserved', () => {
+    test('all 9 command IDs and their categories are preserved', () => {
         const expectedIds = [
             'mysqlAzureAuth.registerServer',
             'mysqlAzureAuth.forgetServer',
@@ -43,8 +43,7 @@ suite('Public surface lock', () => {
             'mysqlAzureAuth.openWorkbench',
             'mysqlAzureAuth.refreshAll',
             'mysqlAzureAuth.previewRows',
-            'mysqlAzureAuth.editRows',
-            'mysqlAzureAuth.createTable',
+            'mysqlAzureAuth.viewMoreRows',
         ];
         const actualIds = pkg.contributes.commands.map((c) => c.command);
         assert.deepStrictEqual(actualIds, expectedIds);
@@ -59,7 +58,7 @@ suite('Public surface lock', () => {
         }
     });
 
-    test('activation events include the 10 commands and the tree view', () => {
+    test('activation events include the 9 commands and the tree view', () => {
         const events = pkg.activationEvents;
         assert.ok(events.includes('onView:mysqlAzureAuth.serversView'));
         for (const cmd of [
@@ -68,8 +67,7 @@ suite('Public surface lock', () => {
             'mysqlAzureAuth.disconnectServer',
             'mysqlAzureAuth.openWorkbench',
             'mysqlAzureAuth.previewRows',
-            'mysqlAzureAuth.editRows',
-            'mysqlAzureAuth.createTable',
+            'mysqlAzureAuth.viewMoreRows',
             'mysqlAzureAuth.forgetServer',
             'mysqlAzureAuth.editServer',
             'mysqlAzureAuth.refreshAll',
@@ -113,8 +111,7 @@ suite('Public surface lock', () => {
             'mysqlAzureAuth.openWorkbench',
             'mysqlAzureAuth.refreshAll',
             'mysqlAzureAuth.previewRows',
-            'mysqlAzureAuth.editRows',
-            'mysqlAzureAuth.createTable',
+            'mysqlAzureAuth.viewMoreRows',
         ];
         for (const id of integrationExpected) {
             assert.ok(

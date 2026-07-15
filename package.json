@@ -89,7 +89,7 @@
         "command": "mysqlAzureAuth.viewMoreRows",
         "title": "View More Rows",
         "category": "MySQL Azure Auth",
-        "icon": "$(edit)"
+        "icon": "$(open-preview)"
       }
     ],
     "viewsContainers": {

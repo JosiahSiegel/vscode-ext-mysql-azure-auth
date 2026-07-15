@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "case": "editRows-leak",
+  "runtimeFixtureSource": "import * as vscode from 'vscode';\n\nfunction activate(context) {\n    const cmd = vscode.commands;\n    context.subscriptions.push(\n        cmd.registerCommand('mysqlAzureAuth.previewRows', () => undefined),\n        cmd.registerCommand('mysqlAzureAuth.editRows', () => undefined)\n    );\n}\n\nexport { activate };\n"
+}

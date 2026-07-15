@@ -86,7 +86,7 @@ suite('Main table commands', () => {
         assert.strictEqual(QueryWorkbench.currentPanels.has('orders'), false);
     });
 
-    test('editRows titles the panel with the server label', async () => {
+    test('viewMoreRows titles the panel with the server label', async () => {
         const titles: string[] = [];
         installActivationStubs(titles);
         const context = extensionContext as unknown as vscode.ExtensionContext;
@@ -94,7 +94,7 @@ suite('Main table commands', () => {
         await catalog.add(makeConnectionConfig({ id: 'cfg-2', name: 'staging' }));
         activate(context);
 
-        await vscode.commands.executeCommand('mysqlAzureAuth.editRows', {
+        await vscode.commands.executeCommand('mysqlAzureAuth.viewMoreRows', {
             connectionId: 'cfg-2',
             tableName: 'users',
         });

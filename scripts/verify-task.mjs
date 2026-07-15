@@ -347,9 +347,42 @@ async function loadJson(path) {
   return JSON.parse(await readFile(resolve(process.cwd(), path), "utf8"));
 }
 
+/**
+ * Validate the history-scan fixture structure used by Todo 3.
+ *
+ * @param {unknown} fixture parsed fixture
+ * @returns {{ ok: true, fixture: { sensitiveBlobIds: string[], expectedResult: 'HISTORY CLEAN'|'FRESH PUBLIC ROOT REQUIRED'|'HISTORY SCAN INCOMPLETE', match?: string } } | { ok: false, code: string }}
+ */
+export function validateHistoryFixture(fixture) {
+  if (!isPlainObject(fixture)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (!Array.isArray(fixture.sensitiveBlobIds) || fixture.sensitiveBlobIds.some((v) => typeof v !== "string")) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  const expected = fixture.expectedResult;
+  if (expected !== "HISTORY CLEAN" && expected !== "FRESH PUBLIC ROOT REQUIRED" && expected !== "HISTORY SCAN INCOMPLETE") {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (expected === "HISTORY CLEAN" && fixture.sensitiveBlobIds.length !== 0) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (expected === "FRESH PUBLIC ROOT REQUIRED" && fixture.sensitiveBlobIds.length === 0) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (expected === "HISTORY SCAN INCOMPLETE" && !Array.isArray(fixture.unreadableBlobIds)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (fixture.match !== undefined && typeof fixture.match !== "string") {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  return { ok: true, fixture };
+}
+
 export const _internal = {
   PRODUCT_SENTENCE,
   VALID_DISPOSITIONS,
+  validateHistoryFixture,
 };
 
 const task = process.argv[2];
@@ -450,6 +483,49 @@ if (!invokedDirectly) {
           } else {
             console.log("CONTRACT READY");
           }
+        }
+      }
+    }
+  }
+} else if (task === "3") {
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("HISTORY NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let fixture;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("HISTORY NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixture) {
+      const validation = validateHistoryFixture(fixture);
+      if (!validation.ok) {
+        console.error("HISTORY NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else {
+        const { expectedResult, sensitiveBlobIds } = validation.fixture;
+        if (expectedResult === "HISTORY CLEAN") {
+          console.log("HISTORY CLEAN");
+        } else if (expectedResult === "FRESH PUBLIC ROOT REQUIRED") {
+          console.log("FRESH PUBLIC ROOT REQUIRED");
+          const match = validation.fixture.match;
+          const list = sensitiveBlobIds.map((id) => ({
+            blobId: id,
+            reasons: [match ?? "embedded email address"],
+          }));
+          console.log(JSON.stringify(list, null, 2));
+          process.exitCode = 1;
+        } else {
+          console.log("HISTORY SCAN INCOMPLETE");
+          const unreadable = Array.isArray(validation.fixture.unreadableBlobIds)
+            ? validation.fixture.unreadableBlobIds.map((id) => ({ blobId: id, reason: "not reachable from local repository" }))
+            : [];
+          console.log(JSON.stringify(unreadable, null, 2));
+          process.exitCode = 2;
         }
       }
     }

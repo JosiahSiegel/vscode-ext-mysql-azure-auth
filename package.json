@@ -189,6 +189,8 @@
     "package:verify": "node scripts/verify-task.mjs package",
     "verify:t1": "node scripts/verify-task.mjs 1",
     "verify:t2": "node test/fixtures/release/release-contract.test.mjs",
+    "verify:t3": "node scripts/verify-task.mjs 3",
+    "history:scan": "node scripts/scan-history.mjs",
     "vscode:prepublish": "npm run esbuild-base -- --minify",
     "esbuild-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
     "compile": "npm run esbuild-base -- --sourcemap && npm run build:integration && npm run icons:regen",

@@ -1,10 +1,12 @@
 .vscode/**
 src/**
+src/test/mocks/**
 node_modules/**
 .gitignore
 tsconfig.json
 .eslintrc.js
 *.map
+out/main.js.map
 **/*.test.js
 out/test/**
 .github/**
@@ -12,8 +14,7 @@ out/test/**
 esbuild.config.test.js
 esbuild.config.integration.js
 .omo/
-scripts/
-.vscode-test/**
-esbuild.config.test.js
-esbuild.config.integration.js
-.omo/
+.playwright-mcp/**
+out/
+*.log
+*.txt

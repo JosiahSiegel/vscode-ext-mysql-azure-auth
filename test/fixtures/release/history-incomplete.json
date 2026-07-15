@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "case": "history-incomplete",
+  "sensitiveBlobIds": [],
+  "unreadableBlobIds": ["f000000000000000000000000000000000000000"],
+  "expectedResult": "HISTORY SCAN INCOMPLETE"
+}

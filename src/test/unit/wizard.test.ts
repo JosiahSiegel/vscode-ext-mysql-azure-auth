@@ -15,6 +15,8 @@ import { makeConnectionConfig } from '../factories/connectionConfig';
 
 class FakePrompts implements FormPrompts {
     public readonly warnings: string[] = [];
+    public confirmCalls: string[] = [];
+    public confirmAnswer: boolean = false;
     private readonly inputs: (string | undefined)[];
     private readonly picks: (string | undefined)[];
     private inputIdx = 0;
@@ -45,6 +47,11 @@ class FakePrompts implements FormPrompts {
 
     reportWarning = (message: string): void => {
         this.warnings.push(message);
+    };
+
+    confirmPlaintext = async (host: string): Promise<boolean> => {
+        this.confirmCalls.push(host);
+        return this.confirmAnswer;
     };
 }
 
@@ -128,30 +135,53 @@ suite('collectNewServer', () => {
         assert.strictEqual(result.config.user, '${env:USER}');
     });
 
-    test('Plaintext TLS pick returns ssl=false and surfaces a warning', async () => {
+    test('Plaintext TLS pick on a non-Azure host returns ssl=false only after modal confirmation', async () => {
         const prompts = new FakePrompts(
-            ['n', 'h', '3306', 'd', 'u'],
+            ['n', 'prod.example.com', '3306', 'd', 'u'],
             ['Plaintext']
         );
+        prompts.confirmAnswer = true;
         const result = await collectNewServer(prompts, () => 'id');
         assert.strictEqual(result.tag, 'ok');
         if (result.tag !== 'ok') throw new Error('unreachable');
         assert.strictEqual(result.config.ssl, false);
+        assert.deepStrictEqual(prompts.confirmCalls, ['prod.example.com']);
         assert.strictEqual(prompts.warnings.length, 1);
         assert.match(prompts.warnings[0]!, /TLS/);
     });
 
-    test('dismissed TLS quick-pick yields ssl=false WITH a warning (never silent)', async () => {
+    test('Plaintext TLS pick on a non-Azure host without modal confirmation defaults to TLS', async () => {
         const prompts = new FakePrompts(
-            ['n', 'h', '3306', 'd', 'u'],
+            ['n', 'prod.example.com', '3306', 'd', 'u'],
+            ['Plaintext']
+        );
+        // No modal sink wired and no confirmAnswer set -> form defaults to TLS.
+        const result = await collectNewServer(prompts, () => 'id');
+        assert.strictEqual(result.tag, 'ok');
+        if (result.tag !== 'ok') throw new Error('unreachable');
+        assert.strictEqual(result.config.ssl, true);
+    });
+
+    test('Plaintext TLS pick on an Azure host is rejected and bounces the user to TLS-only retry', async () => {
+        const prompts = new FakePrompts(
+            ['n', 'prod.mysql.database.azure.com', '3306', 'd', 'u'],
+            ['Plaintext', undefined]
+        );
+        const result = await collectNewServer(prompts, () => 'id');
+        // The TLS-only retry quick-pick was dismissed, so the form returns cancelled.
+        assert.strictEqual(result.tag, 'cancelled');
+        assert.ok(prompts.warnings.some((w) => /mandatory/i.test(w)));
+    });
+
+    test('dismissed TLS quick-pick defaults to TLS (never silently plaintext)', async () => {
+        const prompts = new FakePrompts(
+            ['n', 'prod.example.com', '3306', 'd', 'u'],
             [undefined]
         );
         const result = await collectNewServer(prompts, () => 'id');
         assert.strictEqual(result.tag, 'ok');
         if (result.tag !== 'ok') throw new Error('unreachable');
-        assert.strictEqual(result.config.ssl, false);
-        assert.strictEqual(prompts.warnings.length, 1);
-        assert.match(prompts.warnings[0]!, /TLS picker was dismissed/);
+        assert.strictEqual(result.config.ssl, true);
     });
 });
 
@@ -175,8 +205,32 @@ suite('collectEditedServer', () => {
         assert.strictEqual(prompts.warnings.length, 0);
     });
 
-    test('changing TLS to Plaintext surfaces a warning', async () => {
-        const existing = makeConnectionConfig({ id: 'srv-1', ssl: true });
+    test('changing TLS to Plaintext on a non-Azure host with confirmation returns ssl=false', async () => {
+        const existing = makeConnectionConfig({ id: 'srv-1', ssl: true, host: 'prod.example.com' });
+        const prompts = new FakePrompts(
+            [
+                existing.name,
+                existing.host,
+                String(existing.port),
+                existing.database,
+                existing.user,
+            ],
+            ['Plaintext']
+        );
+        prompts.confirmAnswer = true;
+        const result = await collectEditedServer(prompts, existing);
+        assert.strictEqual(result.tag, 'ok');
+        if (result.tag !== 'ok') throw new Error('unreachable');
+        assert.strictEqual(result.config.ssl, false);
+        assert.strictEqual(prompts.warnings.length, 1);
+    });
+
+    test('changing TLS to Plaintext on an Azure host keeps TLS enabled', async () => {
+        const existing = makeConnectionConfig({
+            id: 'srv-1',
+            ssl: true,
+            host: 'prod.mysql.database.azure.com',
+        });
         const prompts = new FakePrompts(
             [
                 existing.name,
@@ -190,8 +244,8 @@ suite('collectEditedServer', () => {
         const result = await collectEditedServer(prompts, existing);
         assert.strictEqual(result.tag, 'ok');
         if (result.tag !== 'ok') throw new Error('unreachable');
-        assert.strictEqual(result.config.ssl, false);
-        assert.strictEqual(prompts.warnings.length, 1);
+        assert.strictEqual(result.config.ssl, true);
+        assert.ok(prompts.warnings.some((w) => /mandatory/i.test(w)));
     });
 
     test('cancellation at the name step yields cancelled', async () => {

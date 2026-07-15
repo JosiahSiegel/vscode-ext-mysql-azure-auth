@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { z } from 'zod';
 import type { QueryResult } from '../domain';
 import { ActorRegistry } from '../registry/actorRegistry';
+import {
+    GlobalStateConnectionCatalog,
+    queryHistoryKey,
+} from '../registry/connectionCatalog';
 import { CatalogReader } from '../schema/catalogReader';
 import { toCsv, toMarkdown } from './queryFormats';
 import { buildQueryWorkbenchHtml, createNonce, escapeHtml } from './queryWorkbenchHtml';
@@ -69,6 +73,18 @@ export function parseWebviewRequest(value: unknown): ParseOutcome {
 export interface QueryPanelOptions {
     readonly registry: ActorRegistry;
     readonly context?: vscode.ExtensionContext;
+    /**
+     * Catalog used by the privacy policy: when the workbench disposes via
+     * `forgetOnDispose`, the catalog removes both the connection record
+     * and the per-server query-history key.
+     */
+    readonly catalog?: GlobalStateConnectionCatalog;
+    /**
+     * When true, the workbench's `dispose()` calls `catalog.forgetServer(id)`
+     * before tearing down the panel. Defaults to false so unrelated
+     * disposes (e.g. user closing the tab) keep history.
+     */
+    readonly forgetOnDispose?: boolean;
 }
 
 export class QueryWorkbench {
@@ -82,14 +98,20 @@ export class QueryWorkbench {
     private catalogCache: CatalogCache | null = null;
     private webviewReady = false;
     private disposed = false;
+    private readonly catalog: GlobalStateConnectionCatalog | undefined;
+    private readonly forgetOnDispose: boolean;
 
     private constructor(
         private readonly panel: vscode.WebviewPanel,
         private readonly connectionId: string,
         private readonly connectionName: string,
         private readonly registry: ActorRegistry,
-        private readonly context?: vscode.ExtensionContext
+        private readonly context?: vscode.ExtensionContext,
+        catalog?: GlobalStateConnectionCatalog,
+        forgetOnDispose: boolean = false
     ) {
+        this.catalog = catalog;
+        this.forgetOnDispose = forgetOnDispose;
         this.catalogReader = new CatalogReader(() => this.registry.getSession(this.connectionId));
         // The workbench surfaces read-only state in its UI so the user sees
         // the safety posture before issuing any query.
@@ -121,7 +143,15 @@ export class QueryWorkbench {
             enableScripts: true,
             retainContextWhenHidden: true,
         });
-        const workbench = new QueryWorkbench(panel, connectionId, connectionName, options.registry, options.context);
+        const workbench = new QueryWorkbench(
+            panel,
+            connectionId,
+            connectionName,
+            options.registry,
+            options.context,
+            options.catalog,
+            options.forgetOnDispose ?? false
+        );
         QueryWorkbench.currentPanels.set(connectionId, workbench);
         return workbench;
     }
@@ -349,13 +379,20 @@ export class QueryWorkbench {
     }
 
     private get historyKey(): string {
-        return `mysqlAzureAuth.queryHistory.${this.connectionId}`;
+        return queryHistoryKey(this.connectionId);
     }
 
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
         QueryWorkbench.currentPanels.delete(this.connectionId);
+        if (this.forgetOnDispose && this.catalog) {
+            // Privacy: when the user actively forgets a server, the
+            // workbench must not leave per-server SQL history behind.
+            // `forgetServer()` removes both the connection record and
+            // the per-server history key in one atomic step.
+            void this.catalog.forgetServer(this.connectionId);
+        }
         while (this.disposables.length > 0) this.disposables.pop()?.dispose();
         this.panel.dispose();
     }

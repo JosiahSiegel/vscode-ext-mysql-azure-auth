@@ -109,13 +109,18 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
         database: existing?.database ?? '',
         user: existing?.user ?? '',
         ssl: existing?.ssl ?? true,
-        readOnly: existing?.readOnly ?? false,
     };
     const isEdit = options.mode === 'edit';
     const heading = isEdit ? 'Edit server' : 'Register a server';
     const subhead = isEdit
         ? 'Update connection details. Changes apply to new sessions only.'
         : 'Save an Azure Database for MySQL Flexible Server endpoint for Entra-authenticated sessions.';
+
+    // The read-only checkbox was removed in Todo 5: every session is now
+    // uniformly read-only via `SET SESSION TRANSACTION READ ONLY` at checkout,
+    // and the form no longer exposes a writable control. The catalog still
+    // coerces any persisted `readOnly` flag to `true` so legacy records
+    // continue to behave identically.
 
     return `<main class="profile-shell">
 <header class="profile-head">
@@ -159,11 +164,7 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
       <input id="ssl" name="ssl" type="checkbox" ${values.ssl ? 'checked' : ''}>
       <label for="ssl">Encrypt connection (recommended)</label>
     </div>
-    <div class="tls-row">
-      <input id="readOnly" name="readOnly" type="checkbox" ${values.readOnly ? 'checked' : ''}>
-      <label for="readOnly">Read-only session</label>
-      <span class="tls-hint">Server rejects writes; safe for browsing replicas</span>
-    </div>
+    <p class="tls-hint">Sessions are read-only by design — every connection runs <code>SET SESSION TRANSACTION READ ONLY</code> at checkout, so the server rejects writes even if your account has permission to make them.</p>
   </div>
 
   <div id="error" class="error" role="alert"></div>
@@ -196,7 +197,6 @@ function readValues() {
     database: String(data.get('database') || '').trim(),
     user: String(data.get('user') || '').trim(),
     ssl: Boolean(data.get('ssl')),
-    readOnly: Boolean(data.get('readOnly')),
   };
 }
 form.addEventListener('submit', (event) => {

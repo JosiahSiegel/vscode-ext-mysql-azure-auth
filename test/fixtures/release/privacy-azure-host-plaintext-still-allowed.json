@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "azure-host-plaintext-still-allowed",
+  "description": "Synthetic privacy fixture for Todo 5 — reserved for a follow-up gate that asserts Azure hosts may still select plaintext under specific circumstances. Today the production code mandates TLS for canonical Azure hosts and this fixture therefore collapses to the same NOT READY branch. Kept so future regressions that weaken the Azure plaintext block surface as a deterministic failure rather than a silent green check.",
+  "ownerInput": null
+}

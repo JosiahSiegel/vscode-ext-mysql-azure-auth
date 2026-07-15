@@ -388,6 +388,89 @@ export const _internal = {
 };
 
 /* ---------------------------------------------------------------------------
+ * Todo 5 — privacy, persistence, logging, transport policy
+ * -------------------------------------------------------------------------*/
+
+const PRIVACY_DOC_PATH = "docs/PRIVACY.md";
+const PRIVACY_FORM_HTML_PATH = "src/forms/serverFormHtml.ts";
+const PRIVACY_CATALOG_PATH = "src/registry/connectionCatalog.ts";
+const PRIVACY_FORM_PATH = "src/forms/connectionForm.ts";
+const PRIVACY_TEST_BUNDLE_PATH = "out/test/unit/privacy.test.js";
+const PRIVACY_TEST_SOURCE_PATH = "src/test/unit/privacy.test.ts";
+
+const PRIVACY_REQUIRED_PHRASES = [
+  "In-memory cache",
+  "Persisted connection metadata",
+  "Persisted full-SQL history",
+  "Telemetry: none",
+  "Exports",
+  "Diagnostics",
+];
+
+const PRIVACY_DEFAULT_FIXTURE = {
+  schemaVersion: 1,
+  case: "valid",
+  ownerInput: null,
+};
+
+const PRIVACY_VALID_CASES = new Set([
+  "valid",
+  "azure-host-plaintext-still-allowed",
+  "readonly-leak",
+]);
+
+/**
+ * Validate the privacy fixture shape. The fixture carries:
+ *   - schemaVersion (must equal 1)
+ *   - case: "valid" | "azure-host-plaintext-still-allowed" | "readonly-leak"
+ *   - optional ownerInput object (same schema as Todo 4) — when present,
+ *     `verify-task.mjs` echoes its values back; when absent, the validator
+ *     uses a synthetic placeholder set so downstream gates stay stable.
+ *
+ * @param {unknown} fixture parsed fixture
+ * @returns {{ ok: true, fixture: object } | { ok: false, code: string }}
+ */
+export function validatePrivacyFixture(fixture) {
+  if (!isPlainObject(fixture)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (fixture.schemaVersion !== 1) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (!PRIVACY_VALID_CASES.has(fixture.case)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (fixture.ownerInput !== undefined && fixture.ownerInput !== null && !isPlainObject(fixture.ownerInput)) {
+    return { ok: false, code: "FIXTURE_INVALID" };
+  }
+  if (fixture.case === "readonly-leak") {
+    if (typeof fixture.fixtureFormHtml !== "string" || fixture.fixtureFormHtml.length === 0) {
+      return { ok: false, code: "FIXTURE_INVALID" };
+    }
+  }
+  return { ok: true, fixture };
+}
+
+async function fileContains(path, needle) {
+  if (!(await fileExists(path))) return false;
+  const body = await readFile(resolve(process.cwd(), path), "utf8");
+  return body.includes(needle);
+}
+
+export const _internalPrivacy = {
+  PRIVACY_DOC_PATH,
+  PRIVACY_FORM_HTML_PATH,
+  PRIVACY_CATALOG_PATH,
+  PRIVACY_FORM_PATH,
+  PRIVACY_TEST_BUNDLE_PATH,
+  PRIVACY_TEST_SOURCE_PATH,
+  PRIVACY_REQUIRED_PHRASES,
+  PRIVACY_DEFAULT_FIXTURE,
+  PRIVACY_VALID_CASES,
+  validatePrivacyFixture,
+};
+
+/* ---------------------------------------------------------------------------
  * Todo 4 — open-source governance
  * -------------------------------------------------------------------------*/
 
@@ -731,6 +814,122 @@ if (!invokedDirectly) {
           }
         }
       }
+    }
+  }
+} else if (task === "5") {
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const fixture = fixturePath
+    ? await loadJson(fixturePath).catch(() => null)
+    : PRIVACY_DEFAULT_FIXTURE;
+  const validation = validatePrivacyFixture(fixture);
+  if (!validation.ok) {
+    console.error(`PRIVACY NOT READY: ${validation.code}`);
+    process.exitCode = 1;
+  } else {
+    const policy = validation.fixture;
+    const policyFailures = [];
+
+    // (a) docs/PRIVACY.md exists and carries every required section.
+    const docExists = await fileExists(PRIVACY_DOC_PATH);
+    if (!docExists) {
+      policyFailures.push("MISSING_PRIVACY_DOC");
+    } else {
+      const body = await readFile(resolve(process.cwd(), PRIVACY_DOC_PATH), "utf8");
+      const missingPhrases = PRIVACY_REQUIRED_PHRASES.filter((phrase) => !body.includes(phrase));
+      if (missingPhrases.length > 0) {
+        policyFailures.push(`MISSING_PRIVACY_PHRASES=${missingPhrases.join(",")}`);
+      }
+    }
+
+    // (b) readOnly checkbox is gone from the form HTML.
+    //
+    // The `readonly-leak` fixture case carries a `fixtureFormHtml` blob
+    // containing a deliberately-leaky form, so the validator can exercise
+    // its READ_ONLY_REMNANT detection branch without modifying the
+    // production tree. The `valid` and `azure-host-plaintext-still-allowed`
+    // cases inspect the real source file.
+    let formHtmlSource = "";
+    if (policy.case === "readonly-leak" && typeof policy.fixtureFormHtml === "string") {
+      formHtmlSource = policy.fixtureFormHtml;
+    } else {
+      formHtmlSource = (await fileExists(PRIVACY_FORM_HTML_PATH))
+        ? await readFile(resolve(process.cwd(), PRIVACY_FORM_HTML_PATH), "utf8")
+        : "";
+    }
+    if (
+      formHtmlSource.includes('id="readOnly"') ||
+      formHtmlSource.includes('name="readOnly"')
+    ) {
+      policyFailures.push("READ_ONLY_REMNANT");
+    }
+
+    // (c) catalog exports `forgetServer(id)`.
+    const catalogBody = (await fileExists(PRIVACY_CATALOG_PATH))
+      ? await readFile(resolve(process.cwd(), PRIVACY_CATALOG_PATH), "utf8")
+      : "";
+    const forgetServerMatch = /\bforgetServer\s*\(\s*id\s*\)/.test(catalogBody)
+      || /\basync\s+forgetServer\s*\(\s*id\s*:\s*string\s*\)/.test(catalogBody);
+    if (!forgetServerMatch) {
+      policyFailures.push("MISSING_FORGET_SERVER");
+    }
+
+    // (d) connectionForm rejects non-canonical Azure hosts when ssl=false.
+    const formBody = (await fileExists(PRIVACY_FORM_PATH))
+      ? await readFile(resolve(process.cwd(), PRIVACY_FORM_PATH), "utf8")
+      : "";
+    const azureRule = /\.mysql\.database\.azure\.com/.test(formBody);
+    if (!azureRule) {
+      policyFailures.push("MISSING_AZURE_HOST_RULE");
+    }
+
+    // (e) the privacy unit suite exists (either source or bundle).
+    const testSourceExists = await fileExists(PRIVACY_TEST_SOURCE_PATH);
+    const testBundleExists = await fileExists(PRIVACY_TEST_BUNDLE_PATH);
+    if (!testSourceExists && !testBundleExists) {
+      policyFailures.push("MISSING_PRIVACY_TEST");
+    }
+
+    // (f) Drive the unit suite if the bundle is available; otherwise run
+    // a static grep for the three required test names against the source.
+    const requiredTestNames = [
+      "Azure host with ssl=false is rejected",
+      "non-Azure host with ssl=false requires a modal-confirm token",
+      "forgetServer(id) removes both the connection record",
+      "in-memory Entra token cache is not present in globalState",
+    ];
+    if (testBundleExists) {
+      const { spawnSync } = await import("node:child_process");
+      // The bundled `.bin` symlink is named `_mocha` on Windows + Linux;
+      // `mocha` lives only as the module's entry. Use `node` with the
+      // module's main file so we avoid platform-specific shim lookups.
+      const runner = process.execPath;
+      const mochaEntry = resolve(process.cwd(), "node_modules/mocha/bin/mocha.js");
+      const run = spawnSync(
+        runner,
+        [mochaEntry, PRIVACY_TEST_BUNDLE_PATH, "--ui", "tdd", "--reporter", "min"],
+        {
+          cwd: process.cwd(),
+          encoding: "utf8",
+        }
+      );
+      if (run.status !== 0) {
+        policyFailures.push("PRIVACY_TEST_FAIL");
+      }
+    } else if (testSourceExists) {
+      const source = await readFile(resolve(process.cwd(), PRIVACY_TEST_SOURCE_PATH), "utf8");
+      for (const name of requiredTestNames) {
+        if (!source.includes(name)) {
+          policyFailures.push(`MISSING_TEST_CASE=${name}`);
+        }
+      }
+    }
+
+    if (policyFailures.length > 0) {
+      console.log(`PRIVACY NOT READY: ${policyFailures.join("|")}`);
+      process.exitCode = 1;
+    } else {
+      console.log("PRIVACY READY");
     }
   }
 } else {

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "valid",
+  "description": "Synthetic privacy fixture for Todo 5 — exercises the happy-path branch of validatePrivacyFixture. Pairs with the docs/PRIVACY.md, src/forms/serverFormHtml.ts, src/registry/connectionCatalog.ts, src/forms/connectionForm.ts, and src/test/unit/privacy.test.{ts,js} delivered by this todo. When the implementation is in place and the unit bundle is buildable, the verify-task.mjs Todo 5 branch deterministically emits PRIVACY READY and exits 0.",
+  "ownerInput": null
+}

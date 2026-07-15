@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "case": "readonly-leak",
+  "description": "Synthetic privacy fixture for Todo 5 — exercises the readOnly-checkbox-remnant branch. The fixture carries a deliberately-leaky form HTML blob (`fixtureFormHtml`) containing `id=\"readOnly\"` so the validator's READ_ONLY_REMNANT detection path can fire without modifying the production tree. Today the production tree is clean, so pairing this fixture with a clean tree must emit `PRIVACY NOT READY: READ_ONLY_REMNANT` and exit 1.",
+  "ownerInput": null,
+  "fixtureFormHtml": "<form><input id=\"readOnly\" name=\"readOnly\" type=\"checkbox\"></form>"
+}

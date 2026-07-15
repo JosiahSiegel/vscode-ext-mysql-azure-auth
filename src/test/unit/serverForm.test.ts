@@ -10,7 +10,6 @@ const DOM_IDS = [
     'database',
     'user',
     'ssl',
-    'readOnly',
     'error',
     'cancel',
     'submit',
@@ -136,37 +135,42 @@ suite('buildServerFormHtml', () => {
         assert.strictEqual(keybindings.length, 0, `expected zero keybindings, found ${keybindings.length}`);
     });
 
-    test('read-only checkbox renders unchecked for a new connection', () => {
+    test('read-only checkbox is no longer rendered — every session is read-only by default', () => {
         const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
 
-        assert.ok(html.includes('id="readOnly"'), 'readOnly checkbox must exist in the form');
-        assert.ok(html.includes('name="readOnly"'), 'readOnly must be a real form field');
-        assert.match(html, /<input id="readOnly"[^>]*>/);
-        // New connection: not checked by default. Default-off is a deliberate
-        // safety choice: never surprise the user with a write-block.
-        assert.ok(!/<input id="readOnly"[^>]*checked/.test(html), 'readOnly must default to off for new connections');
-        // The label text and the inline hint must both be present.
-        assert.ok(html.includes('Read-only session'));
-        assert.ok(html.includes('Server rejects writes'));
+        // Privacy (Todo 5): the readOnly checkbox was removed. Every session
+        // is uniformly read-only via SET SESSION TRANSACTION READ ONLY at
+        // checkout; the user has no write toggle.
+        assert.strictEqual(html.includes('id="readOnly"'), false);
+        assert.strictEqual(html.includes('name="readOnly"'), false);
+        assert.strictEqual(html.includes('Read-only session'), false);
+        assert.strictEqual(html.includes('Server rejects writes'), false);
+        // The form now explains the read-only behaviour in the transport block.
+        assert.ok(html.includes('SET SESSION TRANSACTION READ ONLY'));
     });
 
-    test('read-only checkbox reflects the existing config in edit mode', () => {
-        const existing = makeConnectionConfig({ readOnly: true });
-        const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'edit', existing });
+    test('read-only checkbox is absent even in edit mode', () => {
+        const htmlNew = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
+        const htmlEditTrue = buildServerFormHtml({
+            nonce: 'test-nonce',
+            mode: 'edit',
+            existing: makeConnectionConfig({ readOnly: true }),
+        });
+        const htmlEditFalse = buildServerFormHtml({
+            nonce: 'test-nonce',
+            mode: 'edit',
+            existing: makeConnectionConfig({ readOnly: false }),
+        });
 
-        assert.match(html, /<input id="readOnly"[^>]*checked/);
+        for (const html of [htmlNew, htmlEditTrue, htmlEditFalse]) {
+            assert.strictEqual(html.includes('id="readOnly"'), false);
+        }
     });
 
-    test('read-only checkbox is unchecked when the existing config has readOnly: false', () => {
-        const existing = makeConnectionConfig({ readOnly: false });
-        const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'edit', existing });
-
-        assert.ok(!/<input id="readOnly"[^>]*checked/.test(html));
-    });
-
-    test('readOnly value is included in the submit payload', () => {
+    test('readOnly value is dropped from the submit payload (the field no longer exists)', () => {
         const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
 
-        assert.ok(html.includes("readOnly: Boolean(data.get('readOnly'))"));
+        assert.strictEqual(html.includes("readOnly: Boolean(data.get('readOnly'))"), false);
+        assert.ok(html.includes("ssl: Boolean(data.get('ssl'))"));
     });
 });

@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "case": "clean",
+  "description": "Clean: src/registry/databaseSession.ts exports acquireReadOnlyConnection, src/registry/sqlClassifier.ts exports classifySqlBatch/classifyStatement, the classifier is wired into the dispatch path of databaseSession.execute(), and src/registry/actorRegistry.ts no longer references advanceClock. The deny-list verbs appear only in the classifier deny-list and rejection branches, never in dispatch. The Todo 8 regression (LEGACY_REMNANT) stays green."
+}

@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "refresher-missing",
+  "description": "Negative fixture: the validator inspects `actorRegistryFixtureSource` as a scoped temp source. The injected blob OMITS the `REFRESH_RETRY_DELAY_MS` constant and the retry-after-5-seconds pattern, simulating a regression that removes the bounded retry. The validator must emit REFRESH RECOVERY NOT READY: REFERSHER_MISSING.",
+  "actorRegistryFixtureSource": "// Synthetic scoped source for Todo 9 validator.\n// The blob omits the bounded retry constants; the validator greps for\n// them after stripping comments and strings.\nexport class DatabaseSession {\n    async acquireReadOnlyConnection(): Promise<{ ok: true }> {\n        return { ok: true };\n    }\n    async execute(sql: string): Promise<unknown> {\n        const verdict = classifySqlBatch(sql);\n        return verdict.accepted ? undefined : { error: verdict.reason };\n    }\n}\nexport function classifySqlBatch(_sql: string): { accepted: true } {\n    return { accepted: true };\n}\nexport class ActorRegistry {\n    private async refresh(): Promise<void> {\n        throw new Error('refresh failed');\n    }\n}\n"
+}

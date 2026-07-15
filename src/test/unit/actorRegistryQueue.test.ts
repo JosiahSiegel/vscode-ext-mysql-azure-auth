@@ -9,6 +9,12 @@
 
 import * as assert from 'assert';
 import { ActorRegistry } from '../../registry/actorRegistry';
+import {
+    classifySqlBatch,
+    classifyStatement,
+    stripCommentsAndStrings,
+    splitSqlBatch,
+} from '../../registry/sqlClassifier';
 import type {
     DatabaseSessionConfig,
     PoolFactory,
@@ -83,22 +89,247 @@ function fakeIdentity(): { readonly getAccessToken: () => Promise<string> } {
     };
 }
 
+suite('SQL classifier (Todo 9)', () => {
+    test('permits simple SELECT', () => {
+        const v = classifySqlBatch('SELECT * FROM t');
+        assert.strictEqual(v.accepted, true);
+    });
+
+    test('permits DESCRIBE and DESC', () => {
+        assert.strictEqual(classifySqlBatch('DESCRIBE t').accepted, true);
+        assert.strictEqual(classifySqlBatch('DESC t').accepted, true);
+    });
+
+    test('permits SHOW', () => {
+        assert.strictEqual(classifySqlBatch('SHOW DATABASES').accepted, true);
+        assert.strictEqual(classifySqlBatch('SHOW TABLES').accepted, true);
+    });
+
+    test('permits EXPLAIN of SELECT', () => {
+        assert.strictEqual(classifySqlBatch('EXPLAIN SELECT 1').accepted, true);
+        assert.strictEqual(classifySqlBatch('EXPLAIN FORMAT=JSON SELECT * FROM t').accepted, true);
+    });
+
+    test('rejects EXPLAIN of INSERT/UPDATE/DELETE', () => {
+        assert.strictEqual(classifySqlBatch('EXPLAIN INSERT INTO t VALUES (1)').accepted, false);
+        assert.strictEqual(classifySqlBatch('EXPLAIN UPDATE t SET a=1').accepted, false);
+        assert.strictEqual(classifySqlBatch('EXPLAIN DELETE FROM t').accepted, false);
+    });
+
+    test('rejects INSERT/UPDATE/DELETE/REPLACE', () => {
+        assert.strictEqual(classifySqlBatch('INSERT INTO t VALUES (1)').accepted, false);
+        assert.strictEqual(classifySqlBatch('UPDATE t SET a=1').accepted, false);
+        assert.strictEqual(classifySqlBatch('DELETE FROM t').accepted, false);
+        assert.strictEqual(classifySqlBatch('REPLACE INTO t VALUES (1)').accepted, false);
+    });
+
+    test('rejects DDL verbs', () => {
+        assert.strictEqual(classifySqlBatch('CREATE TABLE t (a int)').accepted, false);
+        assert.strictEqual(classifySqlBatch('ALTER TABLE t ADD COLUMN b int').accepted, false);
+        assert.strictEqual(classifySqlBatch('DROP TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('TRUNCATE TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('RENAME TABLE t TO t2').accepted, false);
+    });
+
+    test('rejects CALL/LOAD/SET/LOCK/UNLOCK/HANDLER', () => {
+        assert.strictEqual(classifySqlBatch('CALL proc()').accepted, false);
+        assert.strictEqual(classifySqlBatch('SET @x = 1').accepted, false);
+        assert.strictEqual(classifySqlBatch('LOCK TABLES t READ').accepted, false);
+        assert.strictEqual(classifySqlBatch('UNLOCK TABLES').accepted, false);
+        assert.strictEqual(classifySqlBatch('HANDLER t OPEN').accepted, false);
+    });
+
+    test('rejects GRANT/REVOKE/RESET/STOP/START/SHUTDOWN', () => {
+        assert.strictEqual(classifySqlBatch('GRANT ALL ON *.* TO u').accepted, false);
+        assert.strictEqual(classifySqlBatch('REVOKE ALL ON *.* FROM u').accepted, false);
+        assert.strictEqual(classifySqlBatch('RESET MASTER').accepted, false);
+        assert.strictEqual(classifySqlBatch('STOP SLAVE').accepted, false);
+        assert.strictEqual(classifySqlBatch('START SLAVE').accepted, false);
+        assert.strictEqual(classifySqlBatch('SHUTDOWN').accepted, false);
+    });
+
+    test('rejects CHECK/OPTIMIZE/REPAIR/ANALYZE/CHANGE', () => {
+        assert.strictEqual(classifySqlBatch('CHECK TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('OPTIMIZE TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('REPAIR TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('ANALYZE TABLE t').accepted, false);
+        assert.strictEqual(classifySqlBatch('CHANGE MASTER TO ...').accepted, false);
+    });
+
+    test('rejects side-effecting SELECT', () => {
+        const denied = [
+            "SELECT 1 INTO OUTFILE '/tmp/x'",
+            "SELECT 1 INTO DUMPFILE '/tmp/x'",
+            'SELECT * FROM t FOR UPDATE',
+            'SELECT * FROM t FOR SHARE',
+            'SELECT * FROM t LOCK IN SHARE MODE',
+            'SELECT GET_LOCK("x", 1)',
+            'SELECT RELEASE_LOCK("x")',
+            'SELECT SLEEP(1)',
+            'SELECT BENCHMARK(1, 1)',
+            'SELECT LOAD_FILE("/etc/passwd")',
+        ];
+        for (const sql of denied) {
+            const v = classifySqlBatch(sql);
+            assert.strictEqual(v.accepted, false, `expected denied: ${sql}`);
+        }
+    });
+
+    test('rejects user-variable assignment', () => {
+        assert.strictEqual(classifySqlBatch('SELECT @x := 1').accepted, false);
+        assert.strictEqual(classifySqlBatch('SELECT (@y := 1)').accepted, false);
+        assert.strictEqual(classifySqlBatch('SET @z = 1').accepted, false);
+    });
+
+    test('accepts user-variable read (no assignment)', () => {
+        // Pure reference to @x is allowed - it is just a column alias.
+        assert.strictEqual(classifySqlBatch('SELECT @x').accepted, true);
+    });
+
+    test('rejects unknown leading verb', () => {
+        assert.strictEqual(classifySqlBatch('KILL 1').accepted, false);
+        assert.strictEqual(classifySqlBatch('PURGE BINARY LOGS TO "x"').accepted, false);
+    });
+
+    test('rejects executable /*! ... */ comment smuggling disallowed verb', () => {
+        // The classifier must unwrap the executable comment and see the
+        // contained verb, which is itself a denylist hit.
+        const smuggled = 'SELECT 1; /*! INSERT INTO t VALUES (1) */';
+        const v = classifySqlBatch(smuggled);
+        assert.strictEqual(v.accepted, false);
+    });
+
+    test('rejects executable comment around denied verb alone', () => {
+        const smuggled = '/*! DELETE FROM t */';
+        const v = classifySqlBatch(smuggled);
+        assert.strictEqual(v.accepted, false);
+    });
+
+    test('rejects mixed batch atomically (one bad statement poisons the whole batch)', () => {
+        const v = classifySqlBatch('SELECT 1; DROP TABLE t; SELECT 2');
+        assert.strictEqual(v.accepted, false);
+        // The reason should reference DROP, not SELECT.
+        if (v.accepted) throw new Error('unreachable');
+        assert.match(v.reason, /DROP/);
+    });
+
+    test('rejects empty / whitespace-only batch', () => {
+        assert.strictEqual(classifySqlBatch('').accepted, false);
+        assert.strictEqual(classifySqlBatch('   ').accepted, false);
+        assert.strictEqual(classifySqlBatch(';').accepted, false);
+    });
+
+    test('strips ordinary /* ... */ comments and does not regress', () => {
+        const stripped = stripCommentsAndStrings('SELECT /* hidden DROP */ 1');
+        assert.match(stripped, /SELECT/);
+        assert.ok(!/DROP/.test(stripped), 'DROP must be stripped from comments');
+    });
+
+    test('strips string literals so they cannot smuggle verbs', () => {
+        const stripped = stripCommentsAndStrings("SELECT 'DROP TABLE t'");
+        assert.ok(!/DROP/.test(stripped), 'DROP inside a string must be stripped');
+    });
+
+    test('strips -- line comments', () => {
+        const stripped = stripCommentsAndStrings('SELECT 1 -- DROP TABLE t\n');
+        assert.ok(!/DROP/.test(stripped), 'DROP in a line comment must be stripped');
+    });
+
+    test('splitSqlBatch returns individual statements', () => {
+        const stripped = stripCommentsAndStrings('SELECT 1; SELECT 2; SELECT 3');
+        const stmts = splitSqlBatch(stripped);
+        assert.deepStrictEqual(
+            stmts.map((s) => s.trim()),
+            ['SELECT 1', 'SELECT 2', 'SELECT 3']
+        );
+    });
+
+    test('classifyStatement handles single SELECT', () => {
+        const v = classifyStatement('SELECT 1');
+        assert.strictEqual(v.accepted, true);
+    });
+
+    test('classifyStatement handles EXPLAIN of SELECT', () => {
+        const v = classifyStatement('EXPLAIN SELECT 1');
+        assert.strictEqual(v.accepted, true);
+    });
+
+    test('classifyStatement rejects EXPLAIN of INSERT', () => {
+        const v = classifyStatement('EXPLAIN INSERT INTO t VALUES (1)');
+        assert.strictEqual(v.accepted, false);
+        if (v.accepted) throw new Error('unreachable');
+        assert.match(v.reason, /EXPLAIN_NON_READ/);
+    });
+});
+
+suite('DatabaseSession SQL classifier integration (Todo 9)', () => {
+    test('execute() rejects disallowed SQL with code=CLASSIFIER and never reaches the pool', async () => {
+        const { factory, calls } = buildDeferredPool(new Map());
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
+        await reg.connect(baseConfig.id, baseConfig);
+
+        const result = await reg.executeQuery(baseConfig.id, 'INSERT INTO t VALUES (1)');
+        assert.ok(result.error, 'expected error result');
+        assert.match(result.error ?? '', /CLASSIFIER/);
+        // Pool never saw the SQL.
+        assert.strictEqual(calls.length, 0);
+    });
+
+    test('execute() rejects side-effecting SELECT (FOR UPDATE) before reaching the pool', async () => {
+        const { factory, calls } = buildDeferredPool(new Map());
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
+        await reg.connect(baseConfig.id, baseConfig);
+
+        const result = await reg.executeQuery(baseConfig.id, 'SELECT * FROM t FOR UPDATE');
+        assert.ok(result.error, 'expected error result');
+        assert.match(result.error ?? '', /CLASSIFIER/);
+        assert.strictEqual(calls.length, 0);
+    });
+
+    test('execute() rejects mixed batch atomically (no statement runs)', async () => {
+        const { factory, calls } = buildDeferredPool(new Map([
+            ['SELECT', { rows: [{ v: 1 }], fields: [{ name: 'v' }] }],
+        ]));
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
+        await reg.connect(baseConfig.id, baseConfig);
+
+        const result = await reg.executeQuery(baseConfig.id, 'SELECT 1; DROP TABLE t');
+        assert.ok(result.error);
+        assert.strictEqual(calls.length, 0, 'pool must not see any statement in a rejected batch');
+    });
+
+    test('execute() permits plain SELECT and dispatches to the pool', async () => {
+        const { factory, calls } = buildDeferredPool(new Map([
+            ['SELECT 1', { rows: [{ v: 1 }], fields: [{ name: 'v' }] }],
+        ]));
+        const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
+        await reg.connect(baseConfig.id, baseConfig);
+
+        const result = await reg.executeQuery(baseConfig.id, 'SELECT 1');
+        assert.strictEqual(result.error, undefined);
+        assert.strictEqual(result.rows[0]?.v, 1);
+        assert.strictEqual(calls.length, 1);
+    });
+});
+
 suite('ActorRegistry query serialization', () => {
     test('two same-id queries run FIFO through the actor queue', async () => {
         const d1 = deferred();
         const d2 = deferred();
         const { factory } = buildDeferredPool(new Map([
-            ['Q1', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
-            ['Q2', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
+            // Todo 9: the classifier requires real SQL verbs, so we use
+            // SELECT statements tagged with comments the fake matches on.
+            ['/*Q1*/', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
+            ['/*Q2*/', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
         ]));
         const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
 
         const order: string[] = [];
-        const p1 = reg.executeQuery(baseConfig.id, 'Q1').then((r) => {
+        const p1 = reg.executeQuery(baseConfig.id, 'SELECT /*Q1*/ 1').then((r) => {
             order.push(`Q1-done-${r.rows[0]?.v}`);
         });
-        const p2 = reg.executeQuery(baseConfig.id, 'Q2').then((r) => {
+        const p2 = reg.executeQuery(baseConfig.id, 'SELECT /*Q2*/ 2').then((r) => {
             order.push(`Q2-done-${r.rows[0]?.v}`);
         });
 
@@ -112,12 +343,15 @@ suite('ActorRegistry query serialization', () => {
     });
 
     test('a server-error query returns an error result and does not poison the queue', async () => {
-        // Build a pool that throws on 'BAD'. DatabaseSession wraps pool errors
-        // as QueryOutcome.err instead of rejecting, so the registry surfaces the
-        // error via the legacy QueryResult.error field.
+        // Build a pool that throws on the tagged SELECT. DatabaseSession
+        // wraps pool errors as QueryOutcome.err instead of rejecting, so
+        // the registry surfaces the error via the legacy QueryResult.error
+        // field. Todo 9: queries must be valid SQL; we use SELECT 1 with
+        // a tag comment so the fake matches without confusing the
+        // classifier.
         const fakeEnd = async (): Promise<void> => undefined;
         const fakeExecute = async (sql: string): Promise<[unknown[], { name: string }[]]> => {
-            if (sql === 'BAD') throw new Error('pool rejected');
+            if (sql.includes('/*BAD*/')) throw new Error('pool rejected');
             return [[{ v: 1 }], [{ name: 'v' }]];
         };
         const factory: PoolFactory = (_config: DatabaseSessionConfig): PoolLike => ({
@@ -127,12 +361,12 @@ suite('ActorRegistry query serialization', () => {
         const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         await reg.connect(baseConfig.id, baseConfig);
 
-        const errorResult = await reg.executeQuery(baseConfig.id, 'BAD');
+        const errorResult = await reg.executeQuery(baseConfig.id, 'SELECT /*BAD*/ 1');
         assert.ok(errorResult.error, 'expected QueryResult.error to be set');
         assert.match(errorResult.error ?? '', /pool rejected/);
 
         // The queue is not poisoned — a subsequent query succeeds.
-        const okResult = await reg.executeQuery(baseConfig.id, 'GOOD');
+        const okResult = await reg.executeQuery(baseConfig.id, 'SELECT /*GOOD*/ 1');
         assert.strictEqual(okResult.error, undefined);
         assert.strictEqual(okResult.rows[0]?.v, 1);
     });
@@ -141,8 +375,10 @@ suite('ActorRegistry query serialization', () => {
         const d1 = deferred();
         const d2 = deferred();
         const { factory } = buildDeferredPool(new Map([
-            ['A.', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
-            ['B.', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
+            // Todo 9: the classifier requires valid SQL. We use tagged
+            // SELECT comments so the fake matches per-id.
+            ['/*A*/', { rows: [{ v: 1 }], fields: [{ name: 'v' }], deferred: d1 }],
+            ['/*B*/', { rows: [{ v: 2 }], fields: [{ name: 'v' }], deferred: d2 }],
         ]));
         const reg = new ActorRegistry({ identity: fakeIdentity(), poolFactory: factory });
         const cfgA = { ...baseConfig, id: 'cfg-A', name: 'A' };
@@ -151,8 +387,8 @@ suite('ActorRegistry query serialization', () => {
         await reg.connect(cfgB.id, cfgB);
 
         const order: string[] = [];
-        const pA = reg.executeQuery(cfgA.id, 'A.SELECT 1').then(() => order.push('A'));
-        const pB = reg.executeQuery(cfgB.id, 'B.SELECT 1').then(() => order.push('B'));
+        const pA = reg.executeQuery(cfgA.id, 'SELECT /*A*/ 1').then(() => order.push('A'));
+        const pB = reg.executeQuery(cfgB.id, 'SELECT /*B*/ 1').then(() => order.push('B'));
 
         // Both are blocked. Resolve both simultaneously.
         d1.resolve();

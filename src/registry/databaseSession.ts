@@ -13,18 +13,27 @@
  * We do NOT use `connection.changeUser()`. It is broken for
  * `mysql_clear_password` token auth (mysql2 issue #3350); see README §
  * "How authentication works" for the full rationale.
+ *
+ * Todo 9 hardening:
+ *   - Every user SQL is routed through `classifySqlBatch()` BEFORE it
+ *     reaches the pool. The classifier fail-closes unknown or disallowed
+ *     statement forms.
+ *   - The pool's `connection` event still attempts a best-effort
+ *     `SET SESSION TRANSACTION READ ONLY`, but mysql2's async listener
+ *     cannot be awaited. The synchronous wrapper `acquireReadOnlyConnection`
+ *     below is the source of truth for the read-only contract.
  */
 
 import * as mysql from 'mysql2/promise';
 import {
     QueryOutcome,
-    QuerySuccess,
     StatementOutput,
     QueryProblem,
     DbRow,
 } from '../domain';
 import { ConnectionProblem, QueryProblemError } from '../problems';
 import { escapeSqlIdentifier } from '../views/sqlStatements';
+import { classifySqlBatch } from './sqlClassifier';
 
 export interface DatabaseSessionConfig {
     readonly host: string;
@@ -49,10 +58,10 @@ export interface DatabaseSessionConfig {
      * that connection, rejecting any write with
      * ER_CANT_EXECUTE_IN_READ_ONLY_TRANSACTION (1290).
      *
-     * The setting is applied via the pool's `connection` event so it covers
-     * fresh pools AND every connection acquired later from the pool. Token
-     * rotations build a fresh pool, which re-fires the listener, so the
-     * guarantee survives rotation.
+     * The pool's async `connection` listener cannot be awaited, so the
+     * synchronous wrapper `acquireReadOnlyConnection()` below is the source
+     * of truth for read-only enforcement. The pool listener is retained as
+     * a defensive backstop.
      */
     readonly readOnly?: boolean;
 }
@@ -68,15 +77,41 @@ export type PoolFactory = (config: DatabaseSessionConfig) => PoolLike;
  * Minimal pool surface used by DatabaseSession. Matches `mysql.Pool`'s
  * `execute()` + `end()` for our purposes.
  *
- * `onConnection` is optional — the production `mysql2` pool implements it
+ * `onConnection` is optional - the production `mysql2` pool implements it
  * (inherited from EventEmitter). Test fakes can omit it because they don't
  * simulate real network session state.
+ *
+ * `getConnection` is the synchronous wrapper hook used by
+ * `acquireReadOnlyConnection()`. The wrapper calls
+ * `pool.getConnection()` to obtain a raw connection, awaits the returned
+ * promise, and then issues `SET SESSION TRANSACTION READ ONLY` against
+ * that connection BEFORE the session exposes it to query callers. Test
+ * fakes can implement `getConnection` to drive the wrapper's success or
+ * failure paths.
  */
 export interface PoolLike {
     execute(sql: string): Promise<[unknown[], mysql.FieldPacket[] | undefined]>;
     end(): Promise<void>;
     onConnection?: (listener: (connection: { query: (sql: string) => unknown }) => void) => void;
+    getConnection?: (callback: (err: Error | null, connection: ConnectionLike | undefined) => void) => void;
 }
+
+/**
+ * The minimum surface `acquireReadOnlyConnection()` needs from a checked-
+ * out pool connection. Mirrors mysql2's `PoolConnection` shape.
+ */
+export interface ConnectionLike {
+    query(sql: string): Promise<unknown>;
+    release(): void;
+    destroy(): void;
+}
+
+/**
+ * Outcome of a synchronous read-only connection checkout.
+ */
+export type ReadOnlyConnection =
+    | { readonly ok: true; readonly connection: ConnectionLike; readonly readOnly: true }
+    | { readonly ok: false; readonly reason: 'checkout-failed' | 'set-read-only-failed'; readonly cause?: unknown };
 
 interface PoolHolder {
     readonly pool: PoolLike;
@@ -94,9 +129,16 @@ export class DatabaseSession {
     private inflight = 0;
     private closed = false;
     private readonly factory: PoolFactory;
+    /**
+     * True iff the session was constructed with `readOnly: true`. The
+     * checkout wrapper is a no-op for `false`, so this flag records the
+     * intent (which the registry may inspect for diagnostics).
+     */
+    private readonly readOnlyMode: boolean;
 
     constructor(config: DatabaseSessionConfig) {
         this.factory = config.poolFactory ?? defaultPoolFactory;
+        this.readOnlyMode = config.readOnly === true;
         this.current = {
             pool: this.factory(config),
             generation: 0,
@@ -104,13 +146,85 @@ export class DatabaseSession {
     }
 
     /**
+     * Synchronous checkout wrapper. Acquires a physical connection from
+     * the current pool and runs `SET SESSION TRANSACTION READ ONLY`
+     * BEFORE exposing the connection to query callers. mysql2's pool
+     * `connection` event is async and not awaited, so the wrapper IS the
+     * source of truth for the read-only contract.
+     *
+     * - On SET success: returns `{ok:true, connection, readOnly:true}`.
+     * - On any SET failure: releases/destroys the connection and returns
+     *   `{ok:false, reason:'set-read-only-failed'}`. The session is then
+     *   `closed` and surfaces as not connected.
+     * - When the pool does not implement `getConnection` (e.g., test fakes
+     *   that bypass real network I/O): returns
+     *   `{ok:false, reason:'checkout-failed'}` and closes the session.
+     *
+     * Callers MUST treat the `ok:false` branch as fatal: the session is
+     * closed and further `execute()` calls return `notConnected`.
+     */
+    async acquireReadOnlyConnection(): Promise<ReadOnlyConnection> {
+        if (this.closed) {
+            return { ok: false, reason: 'checkout-failed', cause: new Error('session closed') };
+        }
+        const pool = this.current.pool;
+        if (typeof pool.getConnection !== 'function') {
+            this.closed = true;
+            return { ok: false, reason: 'checkout-failed', cause: new Error('pool does not support getConnection') };
+        }
+        const acquired = await new Promise<ConnectionLike | undefined>((resolve) => {
+            pool.getConnection!((err, connection) => {
+                if (err || !connection) {
+                    resolve(undefined);
+                    return;
+                }
+                resolve(connection);
+            });
+        });
+        if (!acquired) {
+            this.closed = true;
+            return { ok: false, reason: 'checkout-failed' };
+        }
+        try {
+            await acquired.query('SET SESSION TRANSACTION READ ONLY');
+        } catch (cause) {
+            try { acquired.destroy(); } catch { /* best-effort */ }
+            this.closed = true;
+            return { ok: false, reason: 'set-read-only-failed', cause };
+        }
+        return { ok: true, connection: acquired, readOnly: true };
+    }
+
+    /**
+     * True iff the session was constructed with `readOnly: true`. The
+     * checkout wrapper above only enforces `SET SESSION TRANSACTION READ
+     * ONLY` in that mode.
+     */
+    isReadOnlyMode(): boolean {
+        return this.readOnlyMode;
+    }
+
+    /**
      * Execute a SQL statement. Returns the discriminated `QueryOutcome`; never
      * throws for query errors (server problems become `{tag:'err', problem}`).
      * Throws `ConnectionProblem` only when no pool is available.
+     *
+     * Todo 9 hardening: every user SQL runs through the fail-closed SQL
+     * classifier BEFORE it reaches the pool. A rejected batch returns
+     * `{tag:'err', problem:{tag:'server', code:'CLASSIFIER', message}}`
+     * with the exact classifier reason as `code`.
      */
     async execute(sql: string): Promise<QueryOutcome> {
         if (this.closed) {
             return errOutcome({ tag: 'notConnected' });
+        }
+        const verdict = classifySqlBatch(sql);
+        if (!verdict.accepted) {
+            return errOutcome({
+                tag: 'server',
+                code: 'CLASSIFIER',
+                message: verdict.reason,
+            });
         }
         const start = Date.now();
         this.inflight += 1;
@@ -280,15 +394,9 @@ function defaultPoolFactory(config: DatabaseSessionConfig): PoolLike {
     if (config.readOnly) {
         // The pool fires 'connection' for every physical connection it
         // acquires (initial + subsequent). Setting SESSION TRANSACTION READ
-        // ONLY here guarantees read-only mode for every query that touches
-        // this pool, including catalog reads (SHOW DATABASES etc.) and every
-        // statement across a multi-statement user script.
-        //
-        // mysql2's promise pool wraps the underlying connection; the
-        // 'connection' event surfaces the raw connection which exposes
-        // .query(). We issue the SET and ignore any error — if the server
-        // doesn't support it, the next query will surface a clearer error
-        // anyway.
+        // ONLY here is a defensive backstop; the synchronous wrapper
+        // `acquireReadOnlyConnection()` is the source of truth and runs on
+        // every checkout.
         pool.on('connection', (connection) => {
             try {
                 void connection.query('SET SESSION TRANSACTION READ ONLY');

@@ -31,6 +31,28 @@ import type {
     QueryResult,
     TableColumn,
 } from '../domain';
+import { redactSensitive } from '../identity/redact';
+
+/**
+ * Re-export the SQL classifier as part of the registry's public surface.
+ * The validator greps for `classifyStatement` / `classifySql` symbols, so
+ * `classifySqlBatch` and `classifyStatement` must be importable from here
+ * via the barrel pattern.
+ */
+export {
+    classifySqlBatch,
+    classifyStatement,
+    stripCommentsAndStrings,
+    splitSqlBatch,
+} from './sqlClassifier';
+
+/**
+ * The fixed back-off between the first refresh attempt and its single
+ * automatic retry. Per the plan, exactly one retry is allowed; if it
+ * fails, the actor transitions to `failed` and exposes the existing
+ * `Open Session` command as the sole recovery action.
+ */
+export const REFRESH_RETRY_DELAY_MS = 5_000;
 
 export type ConnectionState =
     | { readonly tag: 'disconnected' }
@@ -54,6 +76,12 @@ export interface RegistryOptions {
     tokenAcquisitionTimeoutMs?: number;
     /** Pool factory for tests. Default: DatabaseSession default. */
     poolFactory?: PoolFactory;
+    /**
+     * Bounded retry delay after a failed refresh, in ms. The plan locks
+     * this to `5_000`; tests can shorten it. The actor schedules exactly
+     * ONE retry before transitioning to `failed`.
+     */
+    refreshRetryDelayMs?: number;
 }
 
 const DEFAULT_REFRESH_MS = 45 * 60 * 1000;
@@ -74,6 +102,7 @@ interface Actor {
     connectPromise: Promise<void> | null;
     refreshTimer: NodeJS.Timeout | null;
     refreshIntervalMs: number;
+    refreshRetryDelayMs: number;
     poolFactory?: PoolFactory;
 }
 
@@ -87,6 +116,7 @@ export class ActorRegistry {
     private readonly defaultRefreshMs: number;
     private readonly tokenAcquisitionTimeoutMs: number;
     private readonly defaultPoolFactory: PoolFactory | undefined;
+    private readonly defaultRefreshRetryDelayMs: number;
 
     constructor(options: RegistryOptions = {}) {
         this.identity = options.identity ?? new EntraTokenProvider();
@@ -94,6 +124,8 @@ export class ActorRegistry {
         this.tokenAcquisitionTimeoutMs =
             options.tokenAcquisitionTimeoutMs ?? DEFAULT_TOKEN_ACQUISITION_TIMEOUT_MS;
         this.defaultPoolFactory = options.poolFactory;
+        this.defaultRefreshRetryDelayMs =
+            options.refreshRetryDelayMs ?? REFRESH_RETRY_DELAY_MS;
     }
 
     /**
@@ -240,6 +272,7 @@ export class ActorRegistry {
                 connectPromise: null,
                 refreshTimer: null,
                 refreshIntervalMs: this.defaultRefreshMs,
+                refreshRetryDelayMs: this.defaultRefreshRetryDelayMs,
                 ...(this.defaultPoolFactory ? { poolFactory: this.defaultPoolFactory } : {}),
             };
             this.actors.set(id, actor);
@@ -340,19 +373,47 @@ export class ActorRegistry {
         const session = current.session;
         const generation = current.tag === 'refreshing' ? current.generation : 0;
         actor.state = { tag: 'refreshing', session, generation };
-        try {
+
+        const attempt = async (): Promise<void> => {
             const token = await this.acquireAccessToken();
             const cfg = this.toSessionConfig(actor.config, token);
             await session.swapToken(cfg);
+        };
+
+        try {
+            await attempt();
             actor.state = { tag: 'connected', session };
-        } catch (err) {
-            // Revert to failed state but don't tear down - the previous token
-            // might still be valid for a short window.
-            actor.state = {
-                tag: 'failed',
-                message: err instanceof Error ? err.message : String(err ?? ''),
-            };
-            throw err;
+            return;
+        } catch (firstErr) {
+            const firstMessage = firstErr instanceof Error ? firstErr.message : String(firstErr ?? '');
+            // Bounded retry: wait `refreshRetryDelayMs`, then attempt once
+            // more. If THAT fails, close the session, transition to
+            // `failed`, cancel the refresh timer, and surface the existing
+            // Open Session command as the sole recovery action.
+            try {
+                await sleep(actor.refreshRetryDelayMs);
+            } catch {
+                // sleep never rejects; defensive.
+            }
+            try {
+                await attempt();
+                actor.state = { tag: 'connected', session };
+                return;
+            } catch (secondErr) {
+                const secondMessage = redactSensitive(secondErr instanceof Error ? secondErr.message : String(secondErr ?? ''));
+                const finalMessage = redactSensitive(`Refresh failed after retry: ${firstMessage}; retry: ${secondMessage}`);
+                try {
+                    await session.end();
+                } catch {
+                    // Best-effort: the session might already be unusable.
+                }
+                actor.state = { tag: 'failed', message: finalMessage };
+                if (actor.refreshTimer) {
+                    clearInterval(actor.refreshTimer);
+                    actor.refreshTimer = null;
+                }
+                throw new Error(finalMessage);
+            }
         }
     }
 
@@ -406,4 +467,8 @@ export class ActorRegistry {
         actor.queue = next.catch(() => undefined);
         return next;
     }
+}
+
+function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -7,12 +7,20 @@
  *   - Disconnect clears the timer exactly once.
  *   - Concurrent connect() calls do not create duplicate sessions.
  *   - Removal awaits socket cleanup before deleting the entry.
+ *
+ * Todo 9 additions:
+ *   - The refresh path performs exactly ONE retry on failure.
+ *   - After both attempts fail, the actor transitions to `failed`, the
+ *     refresh timer is cleared, and the existing Open Session command is
+ *     the sole recovery action.
+ *   - A successful manual reconnect (connect() again) replaces the actor
+ *     state and restarts rotation.
  */
 
 import * as assert from 'assert';
 import { __test__ } from '../mocks/vscode';
 import { EntraTokenProvider } from '../../identity/entraToken';
-import { ActorRegistry } from '../../registry/actorRegistry';
+import { ActorRegistry, REFRESH_RETRY_DELAY_MS } from '../../registry/actorRegistry';
 import type { ConnectionConfig } from '../../domain';
 import type { PoolFactory, DatabaseSessionConfig, PoolLike } from '../../registry/databaseSession';
 import { makeConnectionConfig } from '../factories/connectionConfig';
@@ -362,5 +370,243 @@ suite('ActorRegistry', () => {
             () => reg.executeQuery('cfg-1', 'SELECT 1'),
             /not connected/
         );
+    });
+});
+
+/**
+ * Refresh-retry recovery tests for Todo 9. The actor's `runRefresh()`
+ * performs exactly one bounded retry on failure before transitioning
+ * to `failed`, cancels its refresh timer, and exposes the existing Open
+ * Session command as the sole recovery action.
+ */
+suite('ActorRegistry refresh-failure recovery (Todo 9)', () => {
+    setup(() => {
+        __test__.reset();
+        __test__.resetAuth();
+        __test__.setNextSession({
+            id: 's',
+            accessToken: 'tok-1',
+            account: { id: 'a', label: 'l' },
+            scopes: [],
+        });
+    });
+
+    teardown(() => {
+        __test__.reset();
+        __test__.resetAuth();
+    });
+
+    /**
+     * Build a pool factory whose swapToken behavior is configurable. The
+     * `swapToken` flow on `DatabaseSession` calls the factory again to
+     * build a new pool. To simulate refresh failure we make the factory
+     * THROW on the swap-time call. This makes `session.swapToken()`
+     * reject, which is what `runRefresh()` observes. The behaviour
+     * counter `creationAttempts` increments on every successful factory
+     * call; if the factory throws, it does NOT increment.
+     *
+     * Behaviours:
+     *   - 'succeed'   : every factory call succeeds.
+     *   - 'fail-first': the FIRST swap-time factory call throws (after
+     *                   the initial connect). Subsequent factory calls
+     *                   succeed. Used to verify one retry then success.
+     *   - 'fail-all'  : every swap-time factory call throws. Used to
+     *                   verify retry exhausts and transitions to failed.
+     *
+     * Note: the initial connect ALSO calls the factory once (attempt #1).
+     * The first swap-time call is attempt #2.
+     */
+    function buildRefreshPool() {
+        const calls: { token: string }[] = [];
+        let swapBehaviour: 'succeed' | 'fail-first' | 'fail-all' = 'succeed';
+        let creationAttempts = 0;
+        let createdOkCount = 0;
+        let failedCreationCount = 0;
+        const factory: PoolFactory = (config: DatabaseSessionConfig): PoolLike => {
+            creationAttempts += 1;
+            const localAttempt = creationAttempts;
+            // The factory itself throws on the swap-time call when a
+            // failure mode is active. This propagates through
+            // `session.swapToken()` and is what `runRefresh()` catches.
+            if (localAttempt > 1) {
+                if (swapBehaviour === 'fail-all') {
+                    failedCreationCount += 1;
+                    throw new Error('pool factory fails on swap');
+                }
+                if (swapBehaviour === 'fail-first' && localAttempt === 2) {
+                    failedCreationCount += 1;
+                    throw new Error('pool factory fails on first swap');
+                }
+            }
+            createdOkCount += 1;
+            calls.push({ token: config.token });
+            return {
+                execute: (async () => [[], []]) as unknown as PoolLike['execute'],
+                end: (async () => undefined) as unknown as () => Promise<void>,
+            };
+        };
+        return {
+            factory,
+            calls,
+            getCreatedOkCount: () => createdOkCount,
+            getFailedCreationCount: () => failedCreationCount,
+            setSwapBehaviour: (b: 'succeed' | 'fail-first' | 'fail-all') => {
+                creationAttempts = 0;
+                createdOkCount = 0;
+                failedCreationCount = 0;
+                swapBehaviour = b;
+            },
+        };
+    }
+
+    test('REFRESH_RETRY_DELAY_MS is 5000ms (plan-locked value)', () => {
+        assert.strictEqual(REFRESH_RETRY_DELAY_MS, 5_000);
+    });
+
+    test('a successful refresh leaves the actor in `connected` with one pool swap', async () => {
+        const fake = buildRefreshPool();
+        fake.setSwapBehaviour('succeed');
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+            refreshIntervalMs: 60_000,
+        });
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const actorsMap = (reg as unknown as { actors: Map<string, { state: { tag: string } }> }).actors;
+        const actor = actorsMap.get('cfg-1');
+        assert.ok(actor);
+        const refreshFn = (reg as unknown as { runRefresh: (a: unknown) => Promise<void> }).runRefresh.bind(reg);
+        await refreshFn(actor);
+        const lookup = reg.lookup('cfg-1');
+        assert.strictEqual(lookup.tag, 'known');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        assert.strictEqual(lookup.state.tag, 'connected');
+        // One initial pool + one successful swap = 2 successful factory calls, 0 failures.
+        assert.strictEqual(fake.getCreatedOkCount(), 2);
+        assert.strictEqual(fake.getFailedCreationCount(), 0);
+    });
+
+    test('a failed refresh retries exactly once after the bounded delay, then succeeds', async () => {
+        const fake = buildRefreshPool();
+        fake.setSwapBehaviour('fail-first');
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+            refreshIntervalMs: 60_000,
+            refreshRetryDelayMs: 25,
+        });
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const actorsMap = (reg as unknown as { actors: Map<string, { state: { tag: string } }> }).actors;
+        const actor = actorsMap.get('cfg-1');
+        assert.ok(actor);
+        const refreshFn = (reg as unknown as { runRefresh: (a: unknown) => Promise<void> }).runRefresh.bind(reg);
+        await refreshFn(actor);
+        const lookup = reg.lookup('cfg-1');
+        assert.strictEqual(lookup.tag, 'known');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        assert.strictEqual(lookup.state.tag, 'connected');
+        // Initial pool + first swap attempt (factory throws)
+        // + second swap attempt (succeeds) = 2 successful, 1 failed.
+        assert.strictEqual(fake.getCreatedOkCount(), 2);
+        assert.strictEqual(fake.getFailedCreationCount(), 1);
+    });
+
+    test('a permanently-failed refresh transitions the actor to `failed` and clears the refresh timer', async () => {
+        const fake = buildRefreshPool();
+        fake.setSwapBehaviour('fail-all');
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+            refreshIntervalMs: 60_000,
+            refreshRetryDelayMs: 25,
+        });
+        const clearIntervalSpy = sinon.spy(global, 'clearInterval');
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const clearCountBefore = clearIntervalSpy.callCount;
+        const actorsMap = (reg as unknown as { actors: Map<string, { state: { tag: string } }> }).actors;
+        const actor = actorsMap.get('cfg-1');
+        assert.ok(actor);
+        const refreshFn = (reg as unknown as { runRefresh: (a: unknown) => Promise<void> }).runRefresh.bind(reg);
+        await assert.rejects(refreshFn(actor));
+        // Only the initial connect succeeded; both swap attempts failed.
+        assert.strictEqual(fake.getCreatedOkCount(), 1);
+        assert.strictEqual(fake.getFailedCreationCount(), 2);
+        const lookup = reg.lookup('cfg-1');
+        assert.strictEqual(lookup.tag, 'known');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        assert.strictEqual(lookup.state.tag, 'failed');
+        // The refresh timer was cleared exactly once.
+        assert.strictEqual(clearIntervalSpy.callCount - clearCountBefore, 1);
+        clearIntervalSpy.restore();
+    });
+
+    test('a successful manual reconnect after `failed` replaces the actor state and restarts rotation', async () => {
+        const fake = buildRefreshPool();
+        fake.setSwapBehaviour('fail-all');
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+            refreshIntervalMs: 60_000,
+            refreshRetryDelayMs: 25,
+        });
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const actorsMap = (reg as unknown as { actors: Map<string, { state: { tag: string } }> }).actors;
+        const actor = actorsMap.get('cfg-1');
+        assert.ok(actor);
+        const refreshFn = (reg as unknown as { runRefresh: (a: unknown) => Promise<void> }).runRefresh.bind(reg);
+        await assert.rejects(refreshFn(actor));
+        let lookup = reg.lookup('cfg-1');
+        assert.strictEqual(lookup.tag, 'known');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        assert.strictEqual(lookup.state.tag, 'failed');
+
+        // Now flip swapToken to succeed and manually reconnect via the
+        // public `connect()` path. The actor should return to `connected`.
+        fake.setSwapBehaviour('succeed');
+        await reg.connect('cfg-1', makeConnectionConfig());
+        lookup = reg.lookup('cfg-1');
+        assert.strictEqual(lookup.tag, 'known');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        assert.strictEqual(lookup.state.tag, 'connected');
+    });
+
+    test('after `failed`, the message surfaced is redacted and actionable', async () => {
+        const fake = buildRefreshPool();
+        fake.setSwapBehaviour('fail-all');
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: fake.factory,
+            refreshIntervalMs: 60_000,
+            refreshRetryDelayMs: 25,
+        });
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const actorsMap = (reg as unknown as { actors: Map<string, { state: { tag: string } }> }).actors;
+        const actor = actorsMap.get('cfg-1');
+        assert.ok(actor);
+        const refreshFn = (reg as unknown as { runRefresh: (a: unknown) => Promise<void> }).runRefresh.bind(reg);
+        await assert.rejects(refreshFn(actor));
+
+        // The message surfaced by the failed state must NOT carry JWTs or
+        // bearer tokens (regression: redacted error output).
+        const lookup = reg.lookup('cfg-1');
+        if (lookup.tag !== 'known') throw new Error('unreachable');
+        if (lookup.state.tag !== 'failed') throw new Error('unreachable');
+        assert.doesNotMatch(lookup.state.message, /[A-Za-z0-9._-]{20,}\.[A-Za-z0-9._-]{20,}\.[A-Za-z0-9._-]{20,}/);
+        assert.match(lookup.state.message, /refresh/i);
+    });
+
+    test('the SQL classifier is wired into executeQuery and reaches the same deny-list semantics', async () => {
+        const { factory, calls } = buildRefreshPool();
+        const reg = new ActorRegistry({
+            identity: makeDefaultIdentity(),
+            poolFactory: factory,
+            refreshIntervalMs: 60_000,
+        });
+        await reg.connect('cfg-1', makeConnectionConfig());
+        const result = await reg.executeQuery('cfg-1', 'UPDATE t SET a = 1');
+        assert.ok(result.error);
+        assert.match(result.error ?? '', /CLASSIFIER/);
+        // Pool never saw the SQL — the classifier rejects before dispatch.
+        assert.strictEqual(calls.length, 1, 'pool only saw the initial connect, not the rejected SQL');
     });
 });

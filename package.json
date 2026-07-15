@@ -1,0 +1,248 @@
+{
+  "name": "mysql-azure-auth",
+  "displayName": "MySQL Azure Auth",
+  "description": "Connect, browse, and query Azure Database for MySQL Flexible Server using Microsoft Entra ID",
+  "version": "0.1.0",
+  "publisher": "your-publisher",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/mysql-azure-auth"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Data Science",
+    "Other"
+  ],
+  "keywords": [
+    "mysql",
+    "azure",
+    "entra",
+    "database",
+    "sql",
+    "flexible-server"
+  ],
+  "icon": "resources/icons/icon.png",
+  "activationEvents": [
+    "onView:mysqlAzureAuth.serversView",
+    "onCommand:mysqlAzureAuth.registerServer",
+    "onCommand:mysqlAzureAuth.connectServer",
+    "onCommand:mysqlAzureAuth.disconnectServer",
+    "onCommand:mysqlAzureAuth.openWorkbench",
+    "onCommand:mysqlAzureAuth.previewRows",
+    "onCommand:mysqlAzureAuth.editRows",
+    "onCommand:mysqlAzureAuth.createTable",
+    "onCommand:mysqlAzureAuth.forgetServer",
+    "onCommand:mysqlAzureAuth.editServer",
+    "onCommand:mysqlAzureAuth.refreshAll",
+    "onLanguage:sql",
+    "onLanguage:mysql",
+    "onView:mysqlAzureAuth.welcomeView",
+    "workspaceContains:**/.vscode/mysql.json"
+  ],
+  "main": "./out/main.js",
+  "_commandsComment": "Status bar items are created programmatically in src/main.ts.",
+  "contributes": {
+    "commands": [
+      {
+        "command": "mysqlAzureAuth.registerServer",
+        "title": "Register Server…",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.forgetServer",
+        "title": "Forget Server",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.editServer",
+        "title": "Edit Server",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.connectServer",
+        "title": "Open Session",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.disconnectServer",
+        "title": "Close Session",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.openWorkbench",
+        "title": "Open Workbench",
+        "category": "MySQL Azure Auth"
+      },
+      {
+        "command": "mysqlAzureAuth.refreshAll",
+        "title": "Refresh All",
+        "category": "MySQL Azure Auth",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "mysqlAzureAuth.previewRows",
+        "title": "Preview Rows",
+        "category": "MySQL Azure Auth",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "mysqlAzureAuth.editRows",
+        "title": "View More Rows",
+        "category": "MySQL Azure Auth",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "mysqlAzureAuth.createTable",
+        "title": "New Table…",
+        "category": "MySQL Azure Auth",
+        "icon": "$(add)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "mysql-azure-auth",
+          "title": "MySQL Azure Auth",
+          "icon": "resources/icons/server-key.svg"
+        }
+      ]
+    },
+    "views": {
+      "mysql-azure-auth": [
+        {
+          "id": "mysqlAzureAuth.serversView",
+          "name": "Servers"
+        },
+        {
+          "id": "mysqlAzureAuth.welcomeView",
+          "name": "Welcome",
+          "when": "mysqlAzureAuth.welcomeVisible"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "mysqlAzureAuth.registerServer",
+          "when": "view == mysqlAzureAuth.serversView",
+          "group": "navigation"
+        },
+        {
+          "command": "mysqlAzureAuth.refreshAll",
+          "when": "view == mysqlAzureAuth.serversView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "mysqlAzureAuth.connectServer",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == server-idle",
+          "group": "inline"
+        },
+        {
+          "command": "mysqlAzureAuth.disconnectServer",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == server-live",
+          "group": "inline"
+        },
+        {
+          "command": "mysqlAzureAuth.openWorkbench",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == server-live"
+        },
+        {
+          "command": "mysqlAzureAuth.createTable",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == server-live"
+        },
+        {
+          "command": "mysqlAzureAuth.editServer",
+          "when": "view == mysqlAzureAuth.serversView && viewItem =~ /^server/"
+        },
+        {
+          "command": "mysqlAzureAuth.forgetServer",
+          "when": "view == mysqlAzureAuth.serversView && viewItem =~ /^server/"
+        },
+        {
+          "command": "mysqlAzureAuth.previewRows",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == table-live",
+          "group": "inline"
+        },
+        {
+          "command": "mysqlAzureAuth.editRows",
+          "when": "view == mysqlAzureAuth.serversView && viewItem == table-live"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "MySQL Azure Auth",
+      "properties": {
+        "mysqlAzureAuth.servers": {
+          "type": "array",
+          "default": [],
+          "description": "Saved MySQL server registrations"
+        },
+        "mysqlAzureAuth.historyLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 0,
+          "maximum": 10000,
+          "description": "Number of queries kept in per-server history"
+        },
+        "mysqlAzureAuth.showRowCounts": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show row counts in the Servers tree"
+        },
+        "mysqlAzureAuth.enableStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show connection status in the status bar"
+        },
+        "mysqlAzureAuth.connectionColors": {
+          "type": "object",
+          "default": {},
+          "description": "Per-id hex color override for the Servers tree status chip"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run esbuild-base -- --minify",
+    "esbuild-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
+    "compile": "npm run esbuild-base -- --sourcemap && npm run build:integration && npm run icons:regen",
+    "icons:regen": "node scripts/regen-icon.js",
+    "watch": "npm run esbuild-base -- --sourcemap --watch",
+    "lint": "eslint src --ext ts",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package --no-dependencies",
+    "build:test": "node esbuild.config.test.js",
+    "build:integration": "node esbuild.config.integration.js",
+    "test:unit": "npm run build:test && node ./out/test/runUnitTests.js",
+    "test:integration": "npm run compile && node ./out/test/runTest.js",
+    "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration",
+    "pretest": "npm run compile"
+  },
+  "dependencies": {
+    "@azure/identity": "4.13.1",
+    "mysql2": "3.22.6",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.6",
+    "@types/node": "^20.x",
+    "@types/sinon": "^17.0.3",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.27.3",
+    "eslint": "^8.56.0",
+    "glob": "^10.3.10",
+    "mocha": "^10.2.0",
+    "sharp": "^0.35.3",
+    "sinon": "^17.0.1",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,27 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "type": "npm",
+            "script": "watch",
+            "problemMatcher": "$esbuild-watch",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "never"
+            },
+            "label": "Watch"
+        },
+        {
+            "type": "npm",
+            "script": "compile",
+            "problemMatcher": "$esbuild",
+            "label": "Compile"
+        },
+        {
+            "type": "npm",
+            "script": "package",
+            "problemMatcher": [],
+            "label": "Package VSIX"
+        }
+    ]
+}

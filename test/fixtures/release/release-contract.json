@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "productSentence": "A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.",
+  "items": {
+    "command:mysqlAzureAuth.registerServer": { "kind": "command", "id": "mysqlAzureAuth.registerServer", "disposition": "KEEP", "title": "Register Server…" },
+    "command:mysqlAzureAuth.forgetServer": { "kind": "command", "id": "mysqlAzureAuth.forgetServer", "disposition": "KEEP", "title": "Forget Server" },
+    "command:mysqlAzureAuth.editServer": { "kind": "command", "id": "mysqlAzureAuth.editServer", "disposition": "KEEP", "title": "Edit Server" },
+    "command:mysqlAzureAuth.connectServer": { "kind": "command", "id": "mysqlAzureAuth.connectServer", "disposition": "KEEP", "title": "Open Session" },
+    "command:mysqlAzureAuth.disconnectServer": { "kind": "command", "id": "mysqlAzureAuth.disconnectServer", "disposition": "KEEP", "title": "Close Session" },
+    "command:mysqlAzureAuth.openWorkbench": { "kind": "command", "id": "mysqlAzureAuth.openWorkbench", "disposition": "KEEP", "title": "Open Workbench" },
+    "command:mysqlAzureAuth.refreshAll": { "kind": "command", "id": "mysqlAzureAuth.refreshAll", "disposition": "KEEP", "title": "Refresh All" },
+    "command:mysqlAzureAuth.previewRows": { "kind": "command", "id": "mysqlAzureAuth.previewRows", "disposition": "KEEP", "title": "Preview Rows" },
+    "command:mysqlAzureAuth.editRows": { "kind": "command", "id": "mysqlAzureAuth.editRows", "disposition": "RENAME", "renameTo": "mysqlAzureAuth.viewMoreRows", "title": "View More Rows" },
+    "command:mysqlAzureAuth.createTable": { "kind": "command", "id": "mysqlAzureAuth.createTable", "disposition": "REMOVE" },
+    "activationEvent:workspaceContains:**/.vscode/mysql.json": { "kind": "activationEvent", "id": "workspaceContains:**/.vscode/mysql.json", "disposition": "REMOVE" },
+    "activationEvent:onLanguage:sql": { "kind": "activationEvent", "id": "onLanguage:sql", "disposition": "REMOVE", "reason": "until an approved consumer exists" },
+    "activationEvent:onLanguage:mysql": { "kind": "activationEvent", "id": "onLanguage:mysql", "disposition": "REMOVE", "reason": "until an approved consumer exists" },
+    "view:mysqlAzureAuth.welcomeAction": { "kind": "view", "id": "mysqlAzureAuth.welcomeAction", "disposition": "INTERNAL", "reason": "internal programmatic" },
+    "setting:mysqlAzureAuth.servers": { "kind": "setting", "id": "mysqlAzureAuth.servers", "disposition": "REMOVE", "reason": "unused / unread" },
+    "setting:mysqlAzureAuth.connectionColors": { "kind": "setting", "id": "mysqlAzureAuth.connectionColors", "disposition": "REMOVE", "reason": "unused / unread" },
+    "setting:mysqlAzureAuth.historyLimit": { "kind": "setting", "id": "mysqlAzureAuth.historyLimit", "disposition": "KEEP" },
+    "setting:mysqlAzureAuth.showRowCounts": { "kind": "setting", "id": "mysqlAzureAuth.showRowCounts", "disposition": "KEEP" },
+    "setting:mysqlAzureAuth.enableStatusBar": { "kind": "setting", "id": "mysqlAzureAuth.enableStatusBar", "disposition": "KEEP" }
+  },
+  "disallowedCommands": [
+    "mysqlAzureAuth.editRows",
+    "mysqlAzureAuth.createTable"
+  ],
+  "disallowedActivationEvents": [
+    "workspaceContains:**/.vscode/mysql.json",
+    "onLanguage:sql",
+    "onLanguage:mysql"
+  ],
+  "disallowedSettings": [
+    "mysqlAzureAuth.servers",
+    "mysqlAzureAuth.connectionColors"
+  ]
+}

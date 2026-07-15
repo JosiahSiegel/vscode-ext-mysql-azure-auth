@@ -1,7 +1,7 @@
 {
   "name": "mysql-azure-auth",
   "displayName": "MySQL Azure Auth",
-  "description": "Connect, browse, and query Azure Database for MySQL Flexible Server using Microsoft Entra ID",
+  "description": "A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.",
   "version": "0.1.0",
   "packageManager": "npm@10.8.1",
   "publisher": "your-publisher",
@@ -33,15 +33,11 @@
     "onCommand:mysqlAzureAuth.disconnectServer",
     "onCommand:mysqlAzureAuth.openWorkbench",
     "onCommand:mysqlAzureAuth.previewRows",
-    "onCommand:mysqlAzureAuth.editRows",
-    "onCommand:mysqlAzureAuth.createTable",
+    "onCommand:mysqlAzureAuth.viewMoreRows",
     "onCommand:mysqlAzureAuth.forgetServer",
     "onCommand:mysqlAzureAuth.editServer",
     "onCommand:mysqlAzureAuth.refreshAll",
-    "onLanguage:sql",
-    "onLanguage:mysql",
-    "onView:mysqlAzureAuth.welcomeView",
-    "workspaceContains:**/.vscode/mysql.json"
+    "onView:mysqlAzureAuth.welcomeView"
   ],
   "main": "./out/main.js",
   "_commandsComment": "Status bar items are created programmatically in src/main.ts.",
@@ -90,16 +86,10 @@
         "icon": "$(open-preview)"
       },
       {
-        "command": "mysqlAzureAuth.editRows",
+        "command": "mysqlAzureAuth.viewMoreRows",
         "title": "View More Rows",
         "category": "MySQL Azure Auth",
         "icon": "$(edit)"
-      },
-      {
-        "command": "mysqlAzureAuth.createTable",
-        "title": "New Table…",
-        "category": "MySQL Azure Auth",
-        "icon": "$(add)"
       }
     ],
     "viewsContainers": {
@@ -153,10 +143,6 @@
           "when": "view == mysqlAzureAuth.serversView && viewItem == server-live"
         },
         {
-          "command": "mysqlAzureAuth.createTable",
-          "when": "view == mysqlAzureAuth.serversView && viewItem == server-live"
-        },
-        {
           "command": "mysqlAzureAuth.editServer",
           "when": "view == mysqlAzureAuth.serversView && viewItem =~ /^server/"
         },
@@ -170,7 +156,7 @@
           "group": "inline"
         },
         {
-          "command": "mysqlAzureAuth.editRows",
+          "command": "mysqlAzureAuth.viewMoreRows",
           "when": "view == mysqlAzureAuth.serversView && viewItem == table-live"
         }
       ]
@@ -178,11 +164,6 @@
     "configuration": {
       "title": "MySQL Azure Auth",
       "properties": {
-        "mysqlAzureAuth.servers": {
-          "type": "array",
-          "default": [],
-          "description": "Saved MySQL server registrations"
-        },
         "mysqlAzureAuth.historyLimit": {
           "type": "number",
           "default": 100,
@@ -199,11 +180,6 @@
           "type": "boolean",
           "default": true,
           "description": "Show connection status in the status bar"
-        },
-        "mysqlAzureAuth.connectionColors": {
-          "type": "object",
-          "default": {},
-          "description": "Per-id hex color override for the Servers tree status chip"
         }
       }
     }
@@ -212,6 +188,7 @@
     "check:runtime": "node scripts/check-runtime.mjs",
     "package:verify": "node scripts/verify-task.mjs package",
     "verify:t1": "node scripts/verify-task.mjs 1",
+    "verify:t2": "node test/fixtures/release/release-contract.test.mjs",
     "vscode:prepublish": "npm run esbuild-base -- --minify",
     "esbuild-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",
     "compile": "npm run esbuild-base -- --sourcemap && npm run build:integration && npm run icons:regen",

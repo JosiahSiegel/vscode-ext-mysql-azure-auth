@@ -1,6 +1,6 @@
 # MySQL Azure Auth
 
-A VS Code workbench for **Azure Database for MySQL Flexible Server** that uses **Microsoft Entra ID** for authentication. Browse servers in the sidebar, open a session, run SQL, and walk the schema without leaving the editor.
+A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.
 
 The extension keeps long-running sessions alive by rotating the Entra access token in the background. In normal use a single session lasts as long as you have VS Code open.
 

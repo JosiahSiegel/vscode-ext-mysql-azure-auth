@@ -192,6 +192,7 @@
     "verify:t3": "node scripts/verify-task.mjs 3",
     "verify:t4": "node scripts/verify-task.mjs 4",
     "verify:t5": "node scripts/verify-task.mjs 5",
+    "verify:t7": "node scripts/verify-task.mjs 7",
     "history:scan": "node scripts/scan-history.mjs",
     "vscode:prepublish": "npm run esbuild-base -- --minify",
     "esbuild-base": "esbuild ./src/main.ts --bundle --outfile=out/main.js --external:vscode --format=cjs --platform=node",

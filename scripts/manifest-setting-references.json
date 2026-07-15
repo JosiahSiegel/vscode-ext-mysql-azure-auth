@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "description": "Static lookup that locks the producer path for each manifest setting listed under contributes.configuration.properties. Each entry captures the source file where the setting is consumed so that the validator can prove every surviving setting has a real implementation reference (i.e. is not a dead setting).",
+  "settings": {
+    "mysqlAzureAuth.historyLimit": {
+      "producer": "src/views/queryWorkbench.ts",
+      "evidence": "historyLimit",
+      "notes": "Drives the per-server query history ring buffer size."
+    },
+    "mysqlAzureAuth.showRowCounts": {
+      "producer": "src/views/connectionExplorer.ts",
+      "evidence": "showRowCounts",
+      "notes": "Toggles row-count annotations in the Servers tree renderer."
+    },
+    "mysqlAzureAuth.enableStatusBar": {
+      "producer": "src/main.ts",
+      "evidence": "enableStatusBar",
+      "notes": "Gates the programmatic status-bar item registered in the composition root."
+    }
+  }
+}

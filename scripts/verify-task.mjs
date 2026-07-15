@@ -1032,6 +1032,207 @@ if (!invokedDirectly) {
       }
     }
   }
+} else if (task === "7") {
+  /* Todo 7 — dead manifest settings / activation events regression gate.
+   *
+   * The extension's surface contract requires that every contribution that
+   * shows up in package.json is reachable from real source. After Todos 2
+   * and 6 collapsed the table-action scope, three dormant contributions
+   * were pruned: the createTable command, the editRows command (renamed
+   * to viewMoreRows), the servers + connectionColors settings, and the
+   * onLanguage:sql / onLanguage:mysql / workspaceContains:**\/.vscode\/
+   * mysql.json activation events. This validator freezes that absence:
+   * if any of those contributions creep back into the manifest — or if
+   * the public-surface lock file still expects them — the validator
+   * emits a deterministic `MANIFEST NOT READY: <code>` and exits 1.
+   */
+  const MANIFEST_REFERENCES_PATH = "scripts/manifest-setting-references.json";
+  const PUBLIC_SURFACE_TEST_PATH = "src/test/unit/publicSurface.test.ts";
+
+  const DISALLOWED_COMMANDS = ["mysqlAzureAuth.createTable", "mysqlAzureAuth.editRows"];
+  const ALLOWED_COMMANDS = ["mysqlAzureAuth.viewMoreRows"];
+  const DISALLOWED_SETTINGS = ["mysqlAzureAuth.servers", "mysqlAzureAuth.connectionColors"];
+  const DISALLOWED_ACTIVATION_EVENTS = [
+    "onLanguage:sql",
+    "onLanguage:mysql",
+    "workspaceContains:**/.vscode/mysql.json",
+  ];
+  const ALLOWED_ACTIVATION_EVENTS = new Set([
+    "onView:mysqlAzureAuth.serversView",
+    "onView:mysqlAzureAuth.welcomeView",
+  ]);
+  // Every onCommand:<id> activation is also allowed as long as <id>
+  // itself is a live command on the manifest (validated separately).
+  const MANIFEST_T7_CASES = new Set(["clean", "createTable-revived", "editRows-revived", "workspaceContains-revived"]);
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("MANIFEST NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let fixture = null;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("MANIFEST NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixture) {
+      if (!isPlainObject(fixture) || fixture.schemaVersion !== 1 || typeof fixture.case !== "string" || !MANIFEST_T7_CASES.has(fixture.case)) {
+        console.error("MANIFEST NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else {
+        const candidateManifest = (fixture.manifest && typeof fixture.manifest === "object")
+          ? fixture.manifest
+          : await loadJson("package.json");
+
+        // (a) Forbidden commands must not appear in contributes.commands.
+        const liveCommands = Array.isArray(candidateManifest?.contributes?.commands)
+          ? candidateManifest.contributes.commands
+              .map((c) => (isPlainObject(c) && isString(c.command) ? c.command : null))
+              .filter((v) => v !== null)
+          : [];
+
+        let manifestCode = null;
+        if (liveCommands.includes("mysqlAzureAuth.createTable")) {
+          manifestCode = "CREATE_TABLE_REVIVED";
+        } else if (liveCommands.includes("mysqlAzureAuth.editRows")) {
+          manifestCode = "EDIT_ROWS_REVIVED";
+        } else if (!ALLOWED_COMMANDS.every((id) => liveCommands.includes(id))) {
+          // viewMoreRows is the post-rename successor; if it is gone,
+          // the rename chain itself has been broken.
+          manifestCode = "VIEW_MORE_ROWS_MISSING";
+        }
+
+        // (b) Forbidden settings must not appear in contributes.configuration.properties.
+        if (!manifestCode) {
+          const liveSettings = isPlainObject(candidateManifest?.contributes?.configuration?.properties)
+            ? Object.keys(candidateManifest.contributes.configuration.properties)
+            : [];
+          for (const forbidden of DISALLOWED_SETTINGS) {
+            if (liveSettings.includes(forbidden)) {
+              manifestCode = forbidden === "mysqlAzureAuth.servers"
+                ? "SERVERS_SETTING_REVIVED"
+                : "CONNECTION_COLORS_REVIVED";
+              break;
+            }
+          }
+        }
+
+        // (c) Disallowed activation events must not appear in activationEvents.
+        if (!manifestCode) {
+          const liveEvents = Array.isArray(candidateManifest?.activationEvents)
+            ? candidateManifest.activationEvents.filter((e) => typeof e === "string")
+            : [];
+          for (const forbidden of DISALLOWED_ACTIVATION_EVENTS) {
+            if (liveEvents.includes(forbidden)) {
+              if (forbidden.startsWith("onLanguage:")) {
+                manifestCode = "LANGUAGE_ACTIVATION_REVIVED";
+              } else {
+                manifestCode = "WORKSPACE_CONTAINS_REVIVED";
+              }
+              break;
+            }
+          }
+          // (d) Every remaining activation event must be on the allowlist
+          //     (onView:* for known views, or onCommand:<id> where <id>
+          //     is itself a live command). Anything else is unapproved.
+          if (!manifestCode) {
+            const commandSet = new Set(liveCommands);
+            for (const evt of liveEvents) {
+              if (ALLOWED_ACTIVATION_EVENTS.has(evt)) continue;
+              if (evt.startsWith("onCommand:")) {
+                const id = evt.slice("onCommand:".length);
+                if (commandSet.has(id)) continue;
+              }
+              manifestCode = "UNAPPROVED_ACTIVATION";
+              break;
+            }
+          }
+        }
+
+        // (e) Every surviving setting must be referenced from the
+        //     producer listed in scripts/manifest-setting-references.json.
+        //     Settings without a producer entry or with an unreadable
+        //     producer are flagged as DEAD_SETTING so the surface stays
+        //     honest.
+        if (!manifestCode) {
+          const liveSettings = isPlainObject(candidateManifest?.contributes?.configuration?.properties)
+            ? Object.keys(candidateManifest.contributes.configuration.properties)
+            : [];
+          let references = null;
+          try {
+            references = await loadJson(MANIFEST_REFERENCES_PATH);
+          } catch {
+            manifestCode = "DEAD_SETTING";
+          }
+          if (!manifestCode) {
+            const refTable = isPlainObject(references?.settings) ? references.settings : null;
+            if (!refTable) {
+              manifestCode = "DEAD_SETTING";
+            } else {
+              for (const setting of liveSettings) {
+                const entry = refTable[setting];
+                if (!isPlainObject(entry) || typeof entry.producer !== "string" || entry.producer.length === 0) {
+                  manifestCode = "DEAD_SETTING";
+                  break;
+                }
+                const producerPath = entry.producer;
+                if (!(await fileExists(producerPath))) {
+                  manifestCode = "DEAD_SETTING";
+                  break;
+                }
+                if (typeof entry.evidence === "string" && entry.evidence.length > 0) {
+                  const producerBody = await readFile(resolve(process.cwd(), producerPath), "utf8");
+                  if (!producerBody.includes(entry.evidence)) {
+                    manifestCode = "DEAD_SETTING";
+                    break;
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        // (f) Public-surface lock file must not still expect removed ids.
+        //     Mirrors Todo 6's `runtimeFixtureSource` pattern: a fixture
+        //     may supply `publicSurfaceTestSource` to substitute a clean
+        //     version so the validator stays fixture-driven.
+        if (!manifestCode) {
+          const surfaceSource = typeof fixture.publicSurfaceTestSource === "string"
+            ? fixture.publicSurfaceTestSource
+            : (await fileExists(PUBLIC_SURFACE_TEST_PATH)
+                ? await readFile(resolve(process.cwd(), PUBLIC_SURFACE_TEST_PATH), "utf8")
+                : "");
+          const stalePatterns = [
+            /mysqlAzureAuth\.servers\b/,
+            /mysqlAzureAuth\.connectionColors\b/,
+            /mysqlAzureAuth\.createTable\b/,
+            /mysqlAzureAuth\.editRows\b/,
+            /onLanguage:sql/,
+            /onLanguage:mysql/,
+            /workspaceContains:\*\*\/\.vscode\/mysql\.json/,
+          ];
+          // Allow mysqlAzureAuth.editRowsToView (a successor identifier
+          // that legitimately contains the editRows substring) to pass.
+          for (const pattern of stalePatterns) {
+            if (pattern.test(surfaceSource)) {
+              manifestCode = "PUBLIC_SURFACE_DRIFT";
+              break;
+            }
+          }
+        }
+
+        if (manifestCode) {
+          console.log(`MANIFEST NOT READY: ${manifestCode}`);
+          process.exitCode = 1;
+        } else {
+          console.log("MANIFEST READY");
+        }
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

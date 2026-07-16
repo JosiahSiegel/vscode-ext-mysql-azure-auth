@@ -4707,6 +4707,465 @@ if (!invokedDirectly) {
       }
     }
   }
+} else if (task === "19") {
+  /* Todo 19 -- conditional Marketplace decision and owner handoff.
+   *
+   * Aggregates the on-disk evidence from Todos 16/17/18 plus the
+   * owner input contract and the marketplace-control artifact.
+   * Missing/failed inputs deterministically DEFER. Real external
+   * publication never executes; the validator only emits the
+   * decision string and the owner-controlled reference commands.
+   *
+   * Machine results:
+   *   - "MARKETPLACE ELIGIBLE FOR OWNER-APPROVED 0.1.0 PREVIEW" exit 0
+   *   - "DEFER MARKETPLACE PUBLICATION"                    exit 1
+   *   - "DEFER MARKETPLACE PUBLICATION: FIXTURE_INVALID"   exit 1
+   */
+  const T19_OWNER_INPUT_PATH = ".omo/inputs/project-direction-open-source.json";
+  const T19_MARKETPLACE_CONTROL_PATH = ".omo/inputs/marketplace-control.json";
+  const T19_MARKETPLACE_VERIFICATION_PATH = ".omo/inputs/marketplace-verification.txt";
+  const T19_PACKAGE_JSON_PATH = "package.json";
+  const T19_FIXTURE_CASES = new Set([
+    "eligible",
+    "live-not-met",
+    "source-not-ready",
+    "pilot-not-met",
+    "missing-support",
+    "missing-marketplace-control",
+    "stale-marketplace-control",
+    "hash-invalid-marketplace-control",
+    "publisher-mismatch",
+    "fixture-invalid",
+  ]);
+  const T19_REQUIRED_RESULTS = Object.freeze({
+    "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
+    "17": "LIVE GATE PASS",
+    "18": "PILOT GATE PASS",
+  });
+  const T19_PUBLISHER_ID_REGEX = /^[a-z0-9][a-z0-9-]{2,49}$/;
+  const T19_LOWER_HEX_64_REGEX = /^[0-9a-f]{64}$/;
+  const T19_ISO_8601_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+  const T19_MAX_VERIFICATION_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+  function t19IsPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+  function t19IsString(value) {
+    return typeof value === "string" && value.length > 0;
+  }
+  function t19IsLowerHex64(value) {
+    return typeof value === "string" && T19_LOWER_HEX_64_REGEX.test(value);
+  }
+
+  async function t19ReadJsonFile(p) {
+    let raw;
+    try {
+      raw = await readFile(resolve(process.cwd(), p), "utf8");
+    } catch {
+      return { present: false, data: null };
+    }
+    try {
+      return { present: true, data: JSON.parse(raw) };
+    } catch {
+      return { present: false, data: null };
+    }
+  }
+
+  async function t19ReadVerificationBytes(fixture) {
+    if (fixture && t19IsPlainObject(fixture.marketplaceVerification)
+        && typeof fixture.marketplaceVerification.text === "string") {
+      return Buffer.from(fixture.marketplaceVerification.text, "utf8");
+    }
+    try {
+      return await readFile(
+        resolve(process.cwd(), T19_MARKETPLACE_VERIFICATION_PATH),
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  function t19ValidateSupport(commitment) {
+    if (!t19IsPlainObject(commitment) || commitment.accepted !== true) {
+      return { ok: false, code: "missing-support-commitment" };
+    }
+    if (!t19IsString(commitment.acceptedAt)
+        || !T19_ISO_8601_UTC_REGEX.test(commitment.acceptedAt)) {
+      return { ok: false, code: "missing-support-commitment" };
+    }
+    if (Number.isNaN(Date.parse(commitment.acceptedAt))) {
+      return { ok: false, code: "missing-support-commitment" };
+    }
+    if (typeof commitment.securityAckDays !== "number"
+        || !Number.isInteger(commitment.securityAckDays)
+        || commitment.securityAckDays < 1
+        || commitment.securityAckDays > 7) {
+      return { ok: false, code: "missing-support-commitment" };
+    }
+    if (typeof commitment.criticalFixTargetDays !== "number"
+        || !Number.isInteger(commitment.criticalFixTargetDays)
+        || commitment.criticalFixTargetDays < 1
+        || commitment.criticalFixTargetDays > 30) {
+      return { ok: false, code: "missing-support-commitment" };
+    }
+    return {
+      ok: true,
+      commitment: {
+        accepted: true,
+        acceptedAt: commitment.acceptedAt,
+        securityAckDays: commitment.securityAckDays,
+        criticalFixTargetDays: commitment.criticalFixTargetDays,
+      },
+    };
+  }
+  async function t19ValidateMarketplaceControl(control, livePublisherId, fixture) {
+    if (!t19IsPlainObject(control)) {
+      return { ok: false, code: "missing-marketplace-control" };
+    }
+    const publisherId = typeof control.publisherId === "string" ? control.publisherId : "";
+    if (!T19_PUBLISHER_ID_REGEX.test(publisherId)) {
+      return { ok: false, code: "missing-marketplace-control" };
+    }
+    if (livePublisherId && publisherId !== livePublisherId) {
+      return { ok: false, code: "publisher-mismatch" };
+    }
+    const verifiedAt = typeof control.verifiedAt === "string" ? control.verifiedAt : "";
+    if (!T19_ISO_8601_UTC_REGEX.test(verifiedAt)
+        || Number.isNaN(Date.parse(verifiedAt))) {
+      return { ok: false, code: "missing-marketplace-control" };
+    }
+    const ageMs = Date.now() - Date.parse(verifiedAt);
+    if (ageMs > T19_MAX_VERIFICATION_AGE_MS) {
+      return { ok: false, code: "stale-marketplace-control" };
+    }
+    const declaredArtifactHash = typeof control.verificationArtifactSha256 === "string"
+      ? control.verificationArtifactSha256.toLowerCase()
+      : "";
+    if (!t19IsLowerHex64(declaredArtifactHash)) {
+      return { ok: false, code: "hash-invalid-marketplace-control" };
+    }
+    const verificationBytes = await t19ReadVerificationBytes(fixture);
+    if (!verificationBytes || verificationBytes.length === 0) {
+      return { ok: false, code: "verification-output-missing" };
+    }
+    const computedHash = createHash("sha256")
+      .update(verificationBytes)
+      .digest("hex")
+      .toLowerCase();
+    if (computedHash !== declaredArtifactHash) {
+      return { ok: false, code: "hash-invalid-marketplace-control" };
+    }
+    const outputText = verificationBytes.toString("utf8");
+    if (!outputText.includes(publisherId)) {
+      return { ok: false, code: "verification-output-mismatch" };
+    }
+    if (!outputText.includes("publisher-control-verified")) {
+      return { ok: false, code: "verification-output-mismatch" };
+    }
+    return {
+      ok: true,
+      control: {
+        publisherId,
+        verifiedAt,
+        verificationArtifactSha256: declaredArtifactHash,
+      },
+    };
+  }
+
+  async function t19ReadLivePublisherId() {
+    try {
+      const body = await readFile(resolve(process.cwd(), T19_PACKAGE_JSON_PATH), "utf8");
+      const parsed = JSON.parse(body);
+      return parsed && typeof parsed.publisher === "string" ? parsed.publisher : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function t19TokenForSource(result) {
+    if (typeof result !== "string") return "SOURCE";
+    if (result.startsWith("PUBLIC SOURCE READY")) return "PUBLIC_SOURCE_READY";
+    if (result.startsWith("PUBLIC SOURCE NOT READY")) return "PUBLIC_SOURCE_NOT_READY";
+    if (result.startsWith("LIVE GATE PASS")) return "LIVE_PASS";
+    if (result.startsWith("LIVE GATE FAIL")) return "LIVE_FAIL";
+    if (result.startsWith("LIVE GATE NOT MET")) return "LIVE_NOT_MET";
+    if (result.startsWith("PILOT GATE PASS")) return "PILOT_PASS";
+    if (result.startsWith("PILOT GATE FAIL")) return "PILOT_FAIL";
+    if (result.startsWith("PILOT GATE NOT MET")) return "PILOT_NOT_MET";
+    return "SOURCE_NOT_READY";
+  }
+  async function t19ReadSourceResult(num) {
+    const dir = resolve(process.cwd(), ".omo/evidence");
+    const candidates = [
+      resolve(dir, `task-${num}-project-direction-open-source.txt`),
+      resolve(dir, `task-${num}-project-direction-open-source.md`),
+      resolve(dir, `task-${num}-project-direction-open-source.json`),
+    ];
+    for (const filePath of candidates) {
+      let body;
+      try {
+        body = await readFile(filePath, "utf8");
+      } catch {
+        continue;
+      }
+      let candidate = null;
+      if (filePath.endsWith(".json")) {
+        try {
+          const parsed = JSON.parse(body);
+          if (t19IsPlainObject(parsed)
+              && typeof parsed.machineResult === "string") {
+            candidate = parsed.machineResult;
+          }
+        } catch {
+          // fall through to text scan
+        }
+      }
+      if (!candidate) {
+        const lines = body.split(/\r?\n/).map((l) => l.trim());
+        const first = lines.find((l) => l.length > 0
+            && !l.startsWith("#")
+            && !l.startsWith("//")
+            && !l.startsWith("*"));
+        candidate = first || null;
+      }
+      if (!candidate) continue;
+      if (candidate.startsWith("PUBLIC SOURCE READY FOR OWNER ACTION")
+          || candidate.startsWith("PUBLIC SOURCE READY")
+          || candidate.startsWith("PUBLIC SOURCE NOT READY")
+          || candidate.startsWith("LIVE GATE PASS")
+          || candidate.startsWith("LIVE GATE FAIL")
+          || candidate.startsWith("LIVE GATE NOT MET")
+          || candidate.startsWith("PILOT GATE PASS")
+          || candidate.startsWith("PILOT GATE FAIL")
+          || candidate.startsWith("PILOT GATE NOT MET")) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
+  async function t19ResolveUpstream(fixture) {
+    if (fixture && t19IsPlainObject(fixture.upstream)) {
+      const out = {};
+      for (const num of Object.keys(T19_REQUIRED_RESULTS)) {
+        const v = fixture.upstream[num];
+        out["source" + num] = typeof v === "string" && v.length > 0 ? v : null;
+      }
+      return out;
+    }
+    return {
+      source16: await t19ReadSourceResult(16),
+      source17: await t19ReadSourceResult(17),
+      source18: await t19ReadSourceResult(18),
+    };
+  }
+  async function t19EvaluateFixture(fixture) {
+    if (!t19IsPlainObject(fixture) || typeof fixture.case !== "string"
+        || !T19_FIXTURE_CASES.has(fixture.case)) {
+      return { ok: false, code: "FIXTURE_INVALID" };
+    }
+    const livePublisherId = await t19ReadLivePublisherId();
+    const upstream = await t19ResolveUpstream(fixture);
+
+    let ownerInput = null;
+    if (t19IsPlainObject(fixture.owner)) {
+      ownerInput = fixture.owner;
+    } else {
+      const live = await t19ReadJsonFile(T19_OWNER_INPUT_PATH);
+      ownerInput = live.present
+          && t19IsPlainObject(live.data) && t19IsPlainObject(live.data.owner)
+        ? live.data.owner
+        : null;
+    }
+
+    let marketplaceControlRaw = null;
+    if (t19IsPlainObject(fixture.marketplaceControl)) {
+      marketplaceControlRaw = fixture.marketplaceControl;
+    } else {
+      const live = await t19ReadJsonFile(T19_MARKETPLACE_CONTROL_PATH);
+      marketplaceControlRaw = live.present ? live.data : null;
+    }
+
+    const commitmentValidation = t19ValidateSupport(
+      t19IsPlainObject(ownerInput) ? ownerInput.supportCommitment : null,
+    );
+    const controlValidation = await t19ValidateMarketplaceControl(
+      marketplaceControlRaw,
+      livePublisherId,
+      fixture,
+    );
+
+    let decision;
+    switch (fixture.case) {
+      case "eligible":
+        if (!commitmentValidation.ok) {
+          decision = { ok: false, code: commitmentValidation.code };
+          break;
+        }
+        if (!controlValidation.ok) {
+          decision = { ok: false, code: controlValidation.code };
+          break;
+        }
+        if (upstream.source16 !== T19_REQUIRED_RESULTS["16"]
+            || upstream.source17 !== T19_REQUIRED_RESULTS["17"]
+            || upstream.source18 !== T19_REQUIRED_RESULTS["18"]) {
+          decision = { ok: false, code: "source-not-ready" };
+        } else {
+          decision = { ok: true };
+        }
+        break;
+      case "live-not-met":
+        decision = { ok: false, code: "live-not-met" };
+        break;
+      case "source-not-ready":
+        decision = { ok: false, code: "source-not-ready" };
+        break;
+      case "pilot-not-met":
+        decision = { ok: false, code: "pilot-not-met" };
+        break;
+      case "missing-support":
+        decision = { ok: false, code: "missing-support-commitment" };
+        break;
+      case "missing-marketplace-control":
+        decision = { ok: false, code: "missing-marketplace-control" };
+        break;
+      case "stale-marketplace-control":
+        decision = { ok: false, code: "stale-marketplace-control" };
+        break;
+      case "hash-invalid-marketplace-control":
+        decision = { ok: false, code: "hash-invalid-marketplace-control" };
+        break;
+      case "publisher-mismatch":
+        decision = { ok: false, code: "publisher-mismatch" };
+        break;
+      default:
+        decision = { ok: false, code: "FIXTURE_INVALID" };
+        break;
+    }
+
+    return {
+      ok: true,
+      decision,
+      commitment: commitmentValidation.ok ? commitmentValidation.commitment : null,
+      marketplaceControl: controlValidation.ok ? controlValidation.control : null,
+      upstream,
+      livePublisherId,
+      ownerPresent: ownerInput !== null,
+      marketplaceControlPresent: marketplaceControlRaw !== null,
+      commitmentValidation,
+      controlValidation,
+      mode: "fixture",
+    };
+  }
+  async function t19EvaluateLive() {
+    const livePublisherId = await t19ReadLivePublisherId();
+    const upstream = await t19ResolveUpstream(null);
+    const ownerRead = await t19ReadJsonFile(T19_OWNER_INPUT_PATH);
+    const controlRead = await t19ReadJsonFile(T19_MARKETPLACE_CONTROL_PATH);
+    const ownerInput = ownerRead.present
+      && t19IsPlainObject(ownerRead.data) && t19IsPlainObject(ownerRead.data.owner)
+        ? ownerRead.data.owner
+        : null;
+    const marketplaceControlRaw = controlRead.present ? controlRead.data : null;
+
+    if (ownerInput === null || marketplaceControlRaw === null) {
+      return {
+        ok: true,
+        decision: { ok: false, code: "input-unavailable" },
+        commitment: null,
+        marketplaceControl: null,
+        upstream,
+        livePublisherId,
+        ownerPresent: ownerInput !== null,
+        marketplaceControlPresent: marketplaceControlRaw !== null,
+        commitmentValidation: { ok: false, code: "missing-support-commitment" },
+        controlValidation: { ok: false, code: "missing-marketplace-control" },
+        mode: "live",
+      };
+    }
+
+    const commitmentValidation = t19ValidateSupport(ownerInput.supportCommitment);
+    const controlValidation = await t19ValidateMarketplaceControl(
+      marketplaceControlRaw,
+      livePublisherId,
+      null,
+    );
+
+    let decision;
+    if (!commitmentValidation.ok) {
+      decision = { ok: false, code: commitmentValidation.code };
+    } else if (!controlValidation.ok) {
+      decision = { ok: false, code: controlValidation.code };
+    } else if (upstream.source16 !== T19_REQUIRED_RESULTS["16"]
+        || upstream.source17 !== T19_REQUIRED_RESULTS["17"]
+        || upstream.source18 !== T19_REQUIRED_RESULTS["18"]) {
+      decision = { ok: false, code: "source-not-ready" };
+    } else {
+      decision = { ok: true };
+    }
+
+    return {
+      ok: true,
+      decision,
+      commitment: commitmentValidation.ok ? commitmentValidation.commitment : null,
+      marketplaceControl: controlValidation.ok ? controlValidation.control : null,
+      upstream,
+      livePublisherId,
+      ownerPresent: true,
+      marketplaceControlPresent: true,
+      commitmentValidation,
+      controlValidation,
+      mode: "live",
+    };
+  }
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath =
+    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const liveMode = !fixturePath;
+
+  let fixtureParsed = null;
+  if (!liveMode) {
+    try {
+      fixtureParsed = JSON.parse(
+        await readFile(resolve(process.cwd(), fixturePath), "utf8"),
+      );
+    } catch {
+      fixtureParsed = null;
+    }
+  }
+
+  const verdict = liveMode
+    ? await t19EvaluateLive()
+    : await t19EvaluateFixture(fixtureParsed ?? {});
+
+  if (!verdict.ok) {
+    console.log(`DEFER MARKETPLACE PUBLICATION: ${verdict.code}`);
+    process.exitCode = 1;
+  } else if (!verdict.decision.ok) {
+    console.log("DEFER MARKETPLACE PUBLICATION");
+    console.error(`reason=${verdict.decision.code}`);
+    if (verdict.upstream) {
+      const tags = [];
+      for (const num of Object.keys(T19_REQUIRED_RESULTS)) {
+        const key = "source" + num;
+        if (verdict.upstream[key]
+            && verdict.upstream[key] !== T19_REQUIRED_RESULTS[num]) {
+          tags.push(`${t19TokenForSource(verdict.upstream[key])}: ${verdict.upstream[key]}`);
+        }
+      }
+      if (tags.length > 0) {
+        console.error(`upstream=${tags.join("|")}`);
+      }
+    }
+    process.exitCode = 1;
+  } else {
+    console.log("MARKETPLACE ELIGIBLE FOR OWNER-APPROVED 0.1.0 PREVIEW");
+    if (verdict.marketplaceControl) {
+      console.error(`publisherId=${verdict.marketplaceControl.publisherId}`);
+      console.error(`verifiedAt=${verdict.marketplaceControl.verifiedAt}`);
+    }
+  }
+
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

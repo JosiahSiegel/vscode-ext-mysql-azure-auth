@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "case": "unknown-case",
+  "description": "Synthetic fixture for the FIXTURE_INVALID branch. The case discriminator is not in the validator allowlist."
+}

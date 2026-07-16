@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "case": "live-not-met",
+  "upstream": {
+    "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
+    "17": "LIVE GATE NOT MET: INPUT UNAVAILABLE",
+    "18": "PILOT GATE PASS"
+  },
+  "owner": {
+    "copyrightHolder": "Synthetic Test Holder",
+    "publisherId": "your-publisher",
+    "repositoryUrl": "https://github.com/your-org/mysql-azure-auth",
+    "securityContact": "mailto:synthetic-owner@example.invalid",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00Z",
+      "securityAckDays": 3,
+      "criticalFixTargetDays": 14
+    },
+    "marketplaceControl": {
+      "publisherId": "your-publisher",
+      "verifiedAt": "2026-07-10T00:00:00Z",
+      "artifactPath": ".omo/inputs/marketplace-control.json",
+      "verificationArtifactSha256": "ae107f7d0d0ccc43e9ad11f1aa9c68f22a3e55d46f9b3a2c598e0a47b26a2edb"
+    }
+  },
+  "marketplaceControl": {
+    "publisherId": "your-publisher",
+    "verifiedAt": "2026-07-10T00:00:00Z",
+    "artifactPath": ".omo/inputs/marketplace-control.json",
+    "verificationArtifactSha256": "ae107f7d0d0ccc43e9ad11f1aa9c68f22a3e55d46f9b3a2c598e0a47b26a2edb"
+  },
+  "marketplaceVerification": {
+    "text": "synthetic marketplace verification output\npublisher: your-publisher\nresult: publisher-control-verified\n"
+  },
+  "description": "Synthetic defer fixture exercising the live-not-met branch."
+}

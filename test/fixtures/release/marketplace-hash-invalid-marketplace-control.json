@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "case": "hash-invalid-marketplace-control",
+  "upstream": {
+    "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
+    "17": "LIVE GATE PASS",
+    "18": "PILOT GATE PASS"
+  },
+  "owner": {
+    "copyrightHolder": "Synthetic Test Holder",
+    "publisherId": "your-publisher",
+    "repositoryUrl": "https://github.com/your-org/mysql-azure-auth",
+    "securityContact": "mailto:synthetic-owner@example.invalid",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00Z",
+      "securityAckDays": 3,
+      "criticalFixTargetDays": 14
+    },
+    "marketplaceControl": {
+      "publisherId": "your-publisher",
+      "verifiedAt": "2026-07-10T00:00:00Z",
+      "artifactPath": ".omo/inputs/marketplace-control.json",
+      "verificationArtifactSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  },
+  "marketplaceControl": {
+    "publisherId": "your-publisher",
+    "verifiedAt": "2026-07-10T00:00:00Z",
+    "artifactPath": ".omo/inputs/marketplace-control.json",
+    "verificationArtifactSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  "marketplaceVerification": {
+    "text": "synthetic marketplace verification output\npublisher: your-publisher\nresult: publisher-control-verified\n"
+  },
+  "description": "Synthetic defer fixture. verificationArtifactSha256 disagrees with the SHA-256 of the supplied verification output; the validator deterministically emits hash-invalid-marketplace-control."
+}

@@ -1,31 +1,32 @@
 {
   "schemaVersion": 1,
   "case": "missing-support",
+  "expectedReason": "missing-support-commitment",
+  "now": "2026-07-16T12:00:00Z",
   "upstream": {
     "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
     "17": "LIVE GATE PASS",
     "18": "PILOT GATE PASS"
   },
   "owner": {
-    "copyrightHolder": "Synthetic Test Holder",
-    "publisherId": "your-publisher",
-    "repositoryUrl": "https://github.com/your-org/mysql-azure-auth",
-    "securityContact": "mailto:synthetic-owner@example.invalid",
+    "publisherId": "synthetic-mysql-preview",
     "marketplaceControl": {
-      "publisherId": "your-publisher",
+      "publisherId": "synthetic-mysql-preview",
       "verifiedAt": "2026-07-10T00:00:00Z",
       "artifactPath": ".omo/inputs/marketplace-control.json",
-      "verificationArtifactSha256": "ae107f7d0d0ccc43e9ad11f1aa9c68f22a3e55d46f9b3a2c598e0a47b26a2edb"
+      "verificationArtifactSha256": "4d9c3485abcd7a703f85ab969d66a928b19df147b2b42ad224448ee4ee0486dc"
     }
   },
   "marketplaceControl": {
-    "publisherId": "your-publisher",
+    "schemaVersion": 1,
+    "publisherId": "synthetic-mysql-preview",
     "verifiedAt": "2026-07-10T00:00:00Z",
-    "artifactPath": ".omo/inputs/marketplace-control.json",
-    "verificationArtifactSha256": "ae107f7d0d0ccc43e9ad11f1aa9c68f22a3e55d46f9b3a2c598e0a47b26a2edb"
+    "verificationOutputPath": ".omo/inputs/marketplace-verification.txt",
+    "verificationOutputSha256": "4d9c3485abcd7a703f85ab969d66a928b19df147b2b42ad224448ee4ee0486dc",
+    "result": "publisher-control-verified"
   },
   "marketplaceVerification": {
-    "text": "synthetic marketplace verification output\npublisher: your-publisher\nresult: publisher-control-verified\n"
+    "text": "publisher: synthetic-mysql-preview\nresult: publisher-control-verified\n"
   },
-  "description": "Synthetic defer fixture. owner.supportCommitment is absent; the validator deterministically emits missing-support-commitment."
+  "fixtureManifestPublisher": "synthetic-mysql-preview"
 }

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "case": "placeholder-identity",
+  "expectedReason": "identity-placeholder-publisher",
+  "description": "Negative fixture exercising the placeholder identity gate. The owner.publisherId contains the placeholder token 'your-'.",
+  "upstream": {
+    "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
+    "17": "LIVE GATE PASS",
+    "18": "PILOT GATE PASS"
+  },
+  "owner": {
+    "publisherId": "your-publisher-id",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-01T00:00:00Z",
+      "securityAckDays": 3,
+      "criticalFixTargetDays": 14
+    },
+"marketplaceControl": {
+    "publisherId": "your-publisher-id",
+    "verifiedAt": "2026-07-10T00:00:00Z",
+    "artifactPath": ".omo/inputs/marketplace-control.json",
+    "verificationArtifactSha256": "ef433f807eddf3d3e5b21c0d7ffa7737bbf246c6ef1ba3d76894753f7596f660"
+  }
+},
+"marketplaceControl": {
+  "schemaVersion": 1,
+  "publisherId": "your-publisher-id",
+  "verifiedAt": "2026-07-10T00:00:00Z",
+  "verificationOutputPath": ".omo/inputs/marketplace-verification.txt",
+  "verificationOutputSha256": "ef433f807eddf3d3e5b21c0d7ffa7737bbf246c6ef1ba3d76894753f7596f660",
+  "result": "publisher-control-verified"
+},
+  "marketplaceVerification": {
+    "text": "publisher: your-publisher-id\nresult: publisher-control-verified\n"
+  },
+  "fixtureManifestPublisher": "your-publisher-id"
+}

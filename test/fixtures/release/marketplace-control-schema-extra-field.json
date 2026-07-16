@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "case": "eligible",
-  "expectedReason": null,
+  "case": "control-schema-extra-field",
+  "expectedReason": "marketplace-control-schema-invalid",
   "now": "2026-07-16T12:00:00Z",
   "upstream": {
     "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
@@ -29,11 +29,11 @@
     "verifiedAt": "2026-07-10T00:00:00Z",
     "verificationOutputPath": ".omo/inputs/marketplace-verification.txt",
     "verificationOutputSha256": "4d9c3485abcd7a703f85ab969d66a928b19df147b2b42ad224448ee4ee0486dc",
-    "result": "publisher-control-verified"
+    "result": "publisher-control-verified",
+    "unexpected": true
   },
   "marketplaceVerification": {
     "text": "publisher: synthetic-mysql-preview\nresult: publisher-control-verified\n"
   },
-  "description": "Synthetic eligible data with an explicit non-placeholder manifest publisher.",
   "fixtureManifestPublisher": "synthetic-mysql-preview"
 }

@@ -4710,50 +4710,163 @@ if (!invokedDirectly) {
 } else if (task === "19") {
   /* Todo 19 -- conditional Marketplace decision and owner handoff.
    *
-   * Aggregates the on-disk evidence from Todos 16/17/18 plus the
-   * owner input contract and the marketplace-control artifact.
-   * Missing/failed inputs deterministically DEFER. Real external
-   * publication never executes; the validator only emits the
-   * decision string and the owner-controlled reference commands.
+   * Aggregates the on-disk evidence from Todos 16/17/18, the owner
+   * input contract (.omo/inputs/project-direction-open-source.json)
+   * AND the standalone Marketplace control artifact
+   * (.omo/inputs/marketplace-control.json) AND the immutable
+   * verification output (.omo/inputs/marketplace-verification.txt).
+   *
+   * The validator refuses to declare ELIGIBLE unless every gate holds:
+   *   - .omo/evidence/task-16: PUBLIC SOURCE READY FOR OWNER ACTION
+   *   - .omo/evidence/task-17: LIVE GATE PASS
+   *   - .omo/evidence/task-18: PILOT GATE PASS
+   *   - owner.supportCommitment: accepted, ISO-8601 acceptedAt,
+   *     1..7 securityAckDays, 1..30 criticalFixTargetDays
+   *   - owner.marketplaceControl: strict schema, non-placeholder
+   *     publisherId, fresh verifiedAt, valid 64-hex hash,
+   *     artifactPath = ".omo/inputs/marketplace-control.json"
+   *   - standalone .omo/inputs/marketplace-control.json: exact
+   *     schema {schemaVersion:1, publisherId, verifiedAt,
+   *     verificationOutputPath=".omo/inputs/marketplace-verification.txt",
+   *     verificationOutputSha256, result="publisher-control-verified"}
+   *   - owner.marketplaceControl.publisherId ==
+   *     standalone.marketplaceControl.publisherId (cross-binding)
+   *     AND == manifest publisher (LIVE mode: package.json#publisher;
+   *     fixture mode: the fixture's fixtureManifestPublisher field).
+   *     The fixture's manifest publisher is independent of any live
+   *     placeholder identity.
+   *   - owner.marketplaceControl.verifiedAt ==
+   *     standalone.marketplaceControl.verifiedAt (cross-binding)
+   *   - owner.marketplaceControl.verificationArtifactSha256 ==
+   *     standalone.marketplaceControl.verificationOutputSha256
+   *     == SHA-256 of the verification output bytes
+   *   - Verification output text CONTAINS the verified publisher ID
+   *     AND the literal "publisher-control-verified".
+   *   - Identity is NOT placeholder-shaped (no "your-", "TODO",
+   *     "placeholder", "TBD", "FIXME", "<placeholder>", or
+   *     "example.invalid" tokens).
+   *
+   * Every gate failure deterministically defers with a precise reason
+   * code on stderr. Real external publication never executes. The
+   * validator never opens a socket, never invokes vsce, never logs
+   * into any service, and never touches a hosted Git remote.
    *
    * Machine results:
    *   - "MARKETPLACE ELIGIBLE FOR OWNER-APPROVED 0.1.0 PREVIEW" exit 0
    *   - "DEFER MARKETPLACE PUBLICATION"                    exit 1
    *   - "DEFER MARKETPLACE PUBLICATION: FIXTURE_INVALID"   exit 1
+   *
+   * Fixture semantics:
+   *   - The "case" field (if present) is OPTIONAL non-semantic
+   *     documentation; the verdict and reason are derived SOLELY from
+   *     the parsed fixture content (owner, marketplaceControl,
+   *     marketplaceVerification.text, upstream). Renaming,
+   *     changing, or removing "case" never affects the verdict.
+   *   - Both `owner.marketplaceControl` (declared in the owner
+   *     object) AND a top-level `marketplaceControl` block (the
+   *     standalone shape) are REQUIRED; they must agree on
+   *     publisherId, verifiedAt, and the cross-binding artifact hash.
+   *   - The synthetic eligible fixture uses the non-placeholder
+   *     `fixtureManifestPublisher` field so its manifest identity is
+   *     self-consistent and never accepts the live placeholder
+   *     "your-publisher" identity from package.json.
    */
+
   const T19_OWNER_INPUT_PATH = ".omo/inputs/project-direction-open-source.json";
   const T19_MARKETPLACE_CONTROL_PATH = ".omo/inputs/marketplace-control.json";
   const T19_MARKETPLACE_VERIFICATION_PATH = ".omo/inputs/marketplace-verification.txt";
   const T19_PACKAGE_JSON_PATH = "package.json";
-  const T19_FIXTURE_CASES = new Set([
-    "eligible",
-    "live-not-met",
-    "source-not-ready",
-    "pilot-not-met",
-    "missing-support",
-    "missing-marketplace-control",
-    "stale-marketplace-control",
-    "hash-invalid-marketplace-control",
-    "publisher-mismatch",
-    "fixture-invalid",
+  const T19_FIXTURE_MANIFEST_PUBLISHER_FIELD = "fixtureManifestPublisher";
+
+  const T19_LITERAL_OUTPUT_PATH = ".omo/inputs/marketplace-verification.txt";
+  const T19_LITERAL_CONTROL_PATH = ".omo/inputs/marketplace-control.json";
+
+  const T19_PLACEHOLDER_TOKENS = Object.freeze([
+    "TODO",
+    "TBD",
+    "FIXME",
+    "your-",
+    "your.",
+    "placeholder",
+    "<placeholder>",
+    "example.invalid",
   ]);
+
   const T19_REQUIRED_RESULTS = Object.freeze({
     "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
     "17": "LIVE GATE PASS",
     "18": "PILOT GATE PASS",
   });
+
   const T19_PUBLISHER_ID_REGEX = /^[a-z0-9][a-z0-9-]{2,49}$/;
   const T19_LOWER_HEX_64_REGEX = /^[0-9a-f]{64}$/;
+  const T19_SHA256_HEX_REGEX = /^[0-9a-f]{64}$/;
   const T19_ISO_8601_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
   const T19_MAX_VERIFICATION_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+  // Strict allowlist: every key that may appear on a Marketplace
+  // control object. Per the plan body the standalone control has
+  // exactly schemaVersion + publisherId + verifiedAt +
+  // verificationOutputPath + verificationOutputSha256 + result;
+  // the owner marketplaceControl has exactly publisherId + verifiedAt
+  // + artifactPath + verificationArtifactSha256. Any extra key is a
+  // content-derived schema rejection.
+  const T19_STANDALONE_ALLOWED_KEYS = new Set([
+    "schemaVersion",
+    "publisherId",
+    "verifiedAt",
+    "verificationOutputPath",
+    "verificationOutputSha256",
+    "result",
+  ]);
+  const T19_OWNER_CONTROL_ALLOWED_KEYS = new Set([
+    "publisherId",
+    "verifiedAt",
+    "artifactPath",
+    "verificationArtifactSha256",
+  ]);
+
+  // Reason-code vocabulary emitted on stderr. The first non-null code
+  // in the priority order is the verdict reason. ELIGIBLE has no code.
+  const T19_REASON = Object.freeze({
+    INPUT_UNAVAILABLE: "input-unavailable",
+    SOURCE_NOT_READY: "source-not-ready",
+    LIVE_NOT_MET: "live-not-met",
+    PILOT_NOT_MET: "pilot-not-met",
+    MISSING_SUPPORT: "missing-support-commitment",
+    MISSING_OWNER_CONTROL: "missing-owner-marketplace-control",
+    MISSING_STANDALONE_CONTROL: "missing-standalone-marketplace-control",
+    CROSS_BINDING_MISMATCH: "cross-binding-mismatch",
+    SCHEMA_INVALID: "marketplace-control-schema-invalid",
+    IDENTITY_PLACEHOLDER: "identity-placeholder-publisher",
+    STALE: "stale-marketplace-control",
+    LIVE_PUBLISHER_MISMATCH: "live-publisher-mismatch",
+    HASH_MISMATCH: "hash-invalid-marketplace-control",
+    VERIFICATION_OUTPUT_MISSING: "verification-output-missing",
+    VERIFICATION_OUTPUT_MISMATCH: "verification-output-mismatch",
+  });
+
+
   function t19IsPlainObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
   }
   function t19IsString(value) {
     return typeof value === "string" && value.length > 0;
   }
-  function t19IsLowerHex64(value) {
-    return typeof value === "string" && T19_LOWER_HEX_64_REGEX.test(value);
+  function t19HasUnknownKeys(value, allowlist) {
+    if (!t19IsPlainObject(value)) return false;
+    for (const key of Object.keys(value)) {
+      if (!allowlist.has(key)) return true;
+    }
+    return false;
+  }
+  function t19ContainsPlaceholder(publisherId) {
+    if (typeof publisherId !== "string") return true;
+    const lower = publisherId.toLowerCase();
+    for (const token of T19_PLACEHOLDER_TOKENS) {
+      if (lower.includes(token.toLowerCase())) return true;
+    }
+    return false;
   }
 
   async function t19ReadJsonFile(p) {
@@ -4771,41 +4884,42 @@ if (!invokedDirectly) {
   }
 
   async function t19ReadVerificationBytes(fixture) {
-    if (fixture && t19IsPlainObject(fixture.marketplaceVerification)
-        && typeof fixture.marketplaceVerification.text === "string") {
+    if (t19IsPlainObject(fixture)
+      && t19IsPlainObject(fixture.marketplaceVerification)
+      && typeof fixture.marketplaceVerification.text === "string"
+      && fixture.marketplaceVerification.text.length > 0) {
       return Buffer.from(fixture.marketplaceVerification.text, "utf8");
     }
     try {
-      return await readFile(
-        resolve(process.cwd(), T19_MARKETPLACE_VERIFICATION_PATH),
-      );
+      return await readFile(resolve(process.cwd(), T19_MARKETPLACE_VERIFICATION_PATH));
     } catch {
       return null;
     }
   }
 
+
   function t19ValidateSupport(commitment) {
     if (!t19IsPlainObject(commitment) || commitment.accepted !== true) {
-      return { ok: false, code: "missing-support-commitment" };
+      return { ok: false, code: T19_REASON.MISSING_SUPPORT };
     }
     if (!t19IsString(commitment.acceptedAt)
-        || !T19_ISO_8601_UTC_REGEX.test(commitment.acceptedAt)) {
-      return { ok: false, code: "missing-support-commitment" };
+      || !T19_ISO_8601_UTC_REGEX.test(commitment.acceptedAt)) {
+      return { ok: false, code: T19_REASON.MISSING_SUPPORT };
     }
     if (Number.isNaN(Date.parse(commitment.acceptedAt))) {
-      return { ok: false, code: "missing-support-commitment" };
+      return { ok: false, code: T19_REASON.MISSING_SUPPORT };
     }
     if (typeof commitment.securityAckDays !== "number"
-        || !Number.isInteger(commitment.securityAckDays)
-        || commitment.securityAckDays < 1
-        || commitment.securityAckDays > 7) {
-      return { ok: false, code: "missing-support-commitment" };
+      || !Number.isInteger(commitment.securityAckDays)
+      || commitment.securityAckDays < 1
+      || commitment.securityAckDays > 7) {
+      return { ok: false, code: T19_REASON.MISSING_SUPPORT };
     }
     if (typeof commitment.criticalFixTargetDays !== "number"
-        || !Number.isInteger(commitment.criticalFixTargetDays)
-        || commitment.criticalFixTargetDays < 1
-        || commitment.criticalFixTargetDays > 30) {
-      return { ok: false, code: "missing-support-commitment" };
+      || !Number.isInteger(commitment.criticalFixTargetDays)
+      || commitment.criticalFixTargetDays < 1
+      || commitment.criticalFixTargetDays > 30) {
+      return { ok: false, code: T19_REASON.MISSING_SUPPORT };
     }
     return {
       ok: true,
@@ -4817,61 +4931,148 @@ if (!invokedDirectly) {
       },
     };
   }
-  async function t19ValidateMarketplaceControl(control, livePublisherId, fixture) {
+
+
+  // Strict-schema validation for the OWNER marketplaceControl block.
+  // Returns either ok:false + code, or ok:true + normalised record.
+  function t19ValidateOwnerControl(control) {
     if (!t19IsPlainObject(control)) {
-      return { ok: false, code: "missing-marketplace-control" };
+      return { ok: false, code: T19_REASON.MISSING_OWNER_CONTROL };
     }
-    const publisherId = typeof control.publisherId === "string" ? control.publisherId : "";
-    if (!T19_PUBLISHER_ID_REGEX.test(publisherId)) {
-      return { ok: false, code: "missing-marketplace-control" };
+    if (t19HasUnknownKeys(control, T19_OWNER_CONTROL_ALLOWED_KEYS)) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
     }
-    if (livePublisherId && publisherId !== livePublisherId) {
-      return { ok: false, code: "publisher-mismatch" };
+    const publisherId = control.publisherId;
+    if (!t19IsString(publisherId) || !T19_PUBLISHER_ID_REGEX.test(publisherId)) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
     }
-    const verifiedAt = typeof control.verifiedAt === "string" ? control.verifiedAt : "";
-    if (!T19_ISO_8601_UTC_REGEX.test(verifiedAt)
-        || Number.isNaN(Date.parse(verifiedAt))) {
-      return { ok: false, code: "missing-marketplace-control" };
+    if (t19ContainsPlaceholder(publisherId)) {
+      return { ok: false, code: T19_REASON.IDENTITY_PLACEHOLDER };
     }
-    const ageMs = Date.now() - Date.parse(verifiedAt);
-    if (ageMs > T19_MAX_VERIFICATION_AGE_MS) {
-      return { ok: false, code: "stale-marketplace-control" };
+    const verifiedAt = control.verifiedAt;
+    if (!t19IsString(verifiedAt)
+      || !T19_ISO_8601_UTC_REGEX.test(verifiedAt)
+      || Number.isNaN(Date.parse(verifiedAt))) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
     }
-    const declaredArtifactHash = typeof control.verificationArtifactSha256 === "string"
-      ? control.verificationArtifactSha256.toLowerCase()
-      : "";
-    if (!t19IsLowerHex64(declaredArtifactHash)) {
-      return { ok: false, code: "hash-invalid-marketplace-control" };
+    if (Date.now() - Date.parse(verifiedAt) > T19_MAX_VERIFICATION_AGE_MS) {
+      return { ok: false, code: T19_REASON.STALE };
     }
-    const verificationBytes = await t19ReadVerificationBytes(fixture);
-    if (!verificationBytes || verificationBytes.length === 0) {
-      return { ok: false, code: "verification-output-missing" };
+    const artifactPath = control.artifactPath;
+    if (artifactPath !== T19_LITERAL_CONTROL_PATH) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
     }
-    const computedHash = createHash("sha256")
-      .update(verificationBytes)
-      .digest("hex")
-      .toLowerCase();
-    if (computedHash !== declaredArtifactHash) {
-      return { ok: false, code: "hash-invalid-marketplace-control" };
-    }
-    const outputText = verificationBytes.toString("utf8");
-    if (!outputText.includes(publisherId)) {
-      return { ok: false, code: "verification-output-mismatch" };
-    }
-    if (!outputText.includes("publisher-control-verified")) {
-      return { ok: false, code: "verification-output-mismatch" };
+    const verificationArtifactSha256 = control.verificationArtifactSha256;
+    if (!t19IsString(verificationArtifactSha256)
+      || !T19_SHA256_HEX_REGEX.test(verificationArtifactSha256.toLowerCase())) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
     }
     return {
       ok: true,
       control: {
         publisherId,
         verifiedAt,
-        verificationArtifactSha256: declaredArtifactHash,
+        artifactPath,
+        verificationArtifactSha256: verificationArtifactSha256.toLowerCase(),
       },
     };
   }
 
-  async function t19ReadLivePublisherId() {
+
+  // Strict-schema validation for the STANDALONE control file.
+  function t19ValidateStandaloneControl(control) {
+    if (!t19IsPlainObject(control)) {
+      return { ok: false, code: T19_REASON.MISSING_STANDALONE_CONTROL };
+    }
+    if (t19HasUnknownKeys(control, T19_STANDALONE_ALLOWED_KEYS)) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    if (control.schemaVersion !== 1) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    const publisherId = control.publisherId;
+    if (!t19IsString(publisherId) || !T19_PUBLISHER_ID_REGEX.test(publisherId)) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    if (t19ContainsPlaceholder(publisherId)) {
+      return { ok: false, code: T19_REASON.IDENTITY_PLACEHOLDER };
+    }
+    const verifiedAt = control.verifiedAt;
+    if (!t19IsString(verifiedAt)
+      || !T19_ISO_8601_UTC_REGEX.test(verifiedAt)
+      || Number.isNaN(Date.parse(verifiedAt))) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    if (Date.now() - Date.parse(verifiedAt) > T19_MAX_VERIFICATION_AGE_MS) {
+      return { ok: false, code: T19_REASON.STALE };
+    }
+    const verificationOutputPath = control.verificationOutputPath;
+    if (verificationOutputPath !== T19_LITERAL_OUTPUT_PATH) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    const verificationOutputSha256 = control.verificationOutputSha256;
+    if (!t19IsString(verificationOutputSha256)
+      || !T19_SHA256_HEX_REGEX.test(verificationOutputSha256.toLowerCase())) {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    if (control.result !== "publisher-control-verified") {
+      return { ok: false, code: T19_REASON.SCHEMA_INVALID };
+    }
+    return {
+      ok: true,
+      control: {
+        schemaVersion: 1,
+        publisherId,
+        verifiedAt,
+        verificationOutputPath,
+        verificationOutputSha256: verificationOutputSha256.toLowerCase(),
+        result: "publisher-control-verified",
+      },
+    };
+  }
+
+
+  // Cross-bind owner.marketplaceControl vs standalone marketplaceControl
+  // AND each declared hash against the verification output raw bytes.
+  function t19CrossBind(ownerControl, standaloneControl, verificationBytes) {
+    if (!t19IsPlainObject(ownerControl) || !t19IsPlainObject(standaloneControl)) {
+      return { ok: false, code: T19_REASON.CROSS_BINDING_MISMATCH };
+    }
+    if (ownerControl.publisherId !== standaloneControl.publisherId) {
+      return { ok: false, code: T19_REASON.CROSS_BINDING_MISMATCH };
+    }
+    if (ownerControl.verifiedAt !== standaloneControl.verifiedAt) {
+      return { ok: false, code: T19_REASON.CROSS_BINDING_MISMATCH };
+    }
+    if (ownerControl.verificationArtifactSha256
+      !== standaloneControl.verificationOutputSha256) {
+      return { ok: false, code: T19_REASON.CROSS_BINDING_MISMATCH };
+    }
+    if (!verificationBytes || verificationBytes.length === 0) {
+      return { ok: false, code: T19_REASON.VERIFICATION_OUTPUT_MISSING };
+    }
+    const computedHash = createHash("sha256")
+      .update(verificationBytes)
+      .digest("hex")
+      .toLowerCase();
+    if (computedHash !== ownerControl.verificationArtifactSha256) {
+      return { ok: false, code: T19_REASON.HASH_MISMATCH };
+    }
+    const outputText = verificationBytes.toString("utf8");
+    if (!outputText.includes(ownerControl.publisherId)) {
+      return { ok: false, code: T19_REASON.VERIFICATION_OUTPUT_MISMATCH };
+    }
+    if (!outputText.includes("publisher-control-verified")) {
+      return { ok: false, code: T19_REASON.VERIFICATION_OUTPUT_MISMATCH };
+    }
+    return {
+      ok: true,
+      computedSha256: computedHash,
+      outputText,
+    };
+  }
+
+  async function t19ReadLiveManifestPublisher() {
     try {
       const body = await readFile(resolve(process.cwd(), T19_PACKAGE_JSON_PATH), "utf8");
       const parsed = JSON.parse(body);
@@ -4881,24 +5082,17 @@ if (!invokedDirectly) {
     }
   }
 
-  function t19TokenForSource(result) {
-    if (typeof result !== "string") return "SOURCE";
-    if (result.startsWith("PUBLIC SOURCE READY")) return "PUBLIC_SOURCE_READY";
-    if (result.startsWith("PUBLIC SOURCE NOT READY")) return "PUBLIC_SOURCE_NOT_READY";
-    if (result.startsWith("LIVE GATE PASS")) return "LIVE_PASS";
-    if (result.startsWith("LIVE GATE FAIL")) return "LIVE_FAIL";
-    if (result.startsWith("LIVE GATE NOT MET")) return "LIVE_NOT_MET";
-    if (result.startsWith("PILOT GATE PASS")) return "PILOT_PASS";
-    if (result.startsWith("PILOT GATE FAIL")) return "PILOT_FAIL";
-    if (result.startsWith("PILOT GATE NOT MET")) return "PILOT_NOT_MET";
-    return "SOURCE_NOT_READY";
-  }
-  async function t19ReadSourceResult(num) {
+
+  // Read one upstream Todo's evidence file. Recognises both the JSON
+  // `machineResult` field (Todos 17/18) and the Markdown backticked
+  // `Machine result` line (Todo 16). Returns the EXACT recorded string
+  // or null when the file is missing/malformed.
+  async function t19ReadUpstreamResult(num) {
     const dir = resolve(process.cwd(), ".omo/evidence");
     const candidates = [
-      resolve(dir, `task-${num}-project-direction-open-source.txt`),
-      resolve(dir, `task-${num}-project-direction-open-source.md`),
       resolve(dir, `task-${num}-project-direction-open-source.json`),
+      resolve(dir, `task-${num}-project-direction-open-source.md`),
+      resolve(dir, `task-${num}-project-direction-open-source.txt`),
     ];
     for (const filePath of candidates) {
       let body;
@@ -4907,265 +5101,340 @@ if (!invokedDirectly) {
       } catch {
         continue;
       }
-      let candidate = null;
       if (filePath.endsWith(".json")) {
         try {
           const parsed = JSON.parse(body);
-          if (t19IsPlainObject(parsed)
-              && typeof parsed.machineResult === "string") {
-            candidate = parsed.machineResult;
+          if (t19IsPlainObject(parsed) && typeof parsed.machine_result === "string") {
+            return parsed.machine_result;
+          }
+          if (t19IsPlainObject(parsed) && typeof parsed.machineResult === "string") {
+            return parsed.machineResult;
           }
         } catch {
           // fall through to text scan
         }
       }
-      if (!candidate) {
-        const lines = body.split(/\r?\n/).map((l) => l.trim());
-        const first = lines.find((l) => l.length > 0
-            && !l.startsWith("#")
-            && !l.startsWith("//")
-            && !l.startsWith("*"));
-        candidate = first || null;
+      // Markdown / text scan: locate a "Machine result" header then
+      // pick the first backticked span within the next several lines.
+      // The header line is itself matched (so "## Machine result string"
+      // is a valid marker); we then scan the next 16 lines looking for
+      // a backticked span that matches one of the canonical machine
+      // result prefixes. Blank lines between the header and the
+      // backticked result are tolerated (do not break on them).
+      const lines = body.split(/\r?\n/);
+      let markerIdx = -1;
+      for (let i = 0; i < lines.length; i += 1) {
+        if (/machine\s+result/i.test(lines[i])) {
+          markerIdx = i;
+          break;
+        }
       }
-      if (!candidate) continue;
-      if (candidate.startsWith("PUBLIC SOURCE READY FOR OWNER ACTION")
-          || candidate.startsWith("PUBLIC SOURCE READY")
-          || candidate.startsWith("PUBLIC SOURCE NOT READY")
-          || candidate.startsWith("LIVE GATE PASS")
-          || candidate.startsWith("LIVE GATE FAIL")
-          || candidate.startsWith("LIVE GATE NOT MET")
-          || candidate.startsWith("PILOT GATE PASS")
-          || candidate.startsWith("PILOT GATE FAIL")
-          || candidate.startsWith("PILOT GATE NOT MET")) {
-        return candidate;
+      const slice = markerIdx === -1
+        ? lines
+        : lines.slice(markerIdx, markerIdx + 16);
+      for (const lineRaw of slice) {
+        const tickMatch = lineRaw.match(/`([^`]+)`/);
+        if (!tickMatch) continue;
+        const candidate = tickMatch[1].trim();
+        if (/^(PUBLIC SOURCE|LIVE GATE|PILOT GATE)/.test(candidate)) {
+          return candidate;
+        }
+      }
+      // Fallback: first non-blank, non-heading, non-comment line that
+      // starts with one of the canonical prefixes.
+      for (const lineRaw of lines) {
+        const trimmed = lineRaw.trim();
+        if (trimmed.length === 0) continue;
+        if (trimmed.startsWith("#") || trimmed.startsWith("//") || trimmed.startsWith("*")) continue;
+        if (/^(PUBLIC SOURCE|LIVE GATE|PILOT GATE)/.test(trimmed)) return trimmed;
       }
     }
     return null;
   }
 
+
   async function t19ResolveUpstream(fixture) {
-    if (fixture && t19IsPlainObject(fixture.upstream)) {
+    if (t19IsPlainObject(fixture) && t19IsPlainObject(fixture.upstream)) {
       const out = {};
       for (const num of Object.keys(T19_REQUIRED_RESULTS)) {
         const v = fixture.upstream[num];
-        out["source" + num] = typeof v === "string" && v.length > 0 ? v : null;
+        out["source" + num] = (typeof v === "string" && v.length > 0) ? v : null;
       }
       return out;
     }
     return {
-      source16: await t19ReadSourceResult(16),
-      source17: await t19ReadSourceResult(17),
-      source18: await t19ReadSourceResult(18),
+      source16: await t19ReadUpstreamResult(16),
+      source17: await t19ReadUpstreamResult(17),
+      source18: await t19ReadUpstreamResult(18),
     };
   }
-  async function t19EvaluateFixture(fixture) {
-    if (!t19IsPlainObject(fixture) || typeof fixture.case !== "string"
-        || !T19_FIXTURE_CASES.has(fixture.case)) {
-      return { ok: false, code: "FIXTURE_INVALID" };
-    }
-    const livePublisherId = await t19ReadLivePublisherId();
-    const upstream = await t19ResolveUpstream(fixture);
 
-    let ownerInput = null;
-    if (t19IsPlainObject(fixture.owner)) {
-      ownerInput = fixture.owner;
-    } else {
-      const live = await t19ReadJsonFile(T19_OWNER_INPUT_PATH);
-      ownerInput = live.present
-          && t19IsPlainObject(live.data) && t19IsPlainObject(live.data.owner)
-        ? live.data.owner
-        : null;
-    }
 
-    let marketplaceControlRaw = null;
-    if (t19IsPlainObject(fixture.marketplaceControl)) {
-      marketplaceControlRaw = fixture.marketplaceControl;
-    } else {
-      const live = await t19ReadJsonFile(T19_MARKETPLACE_CONTROL_PATH);
-      marketplaceControlRaw = live.present ? live.data : null;
-    }
-
-    const commitmentValidation = t19ValidateSupport(
-      t19IsPlainObject(ownerInput) ? ownerInput.supportCommitment : null,
-    );
-    const controlValidation = await t19ValidateMarketplaceControl(
-      marketplaceControlRaw,
-      livePublisherId,
-      fixture,
-    );
-
-    let decision;
-    switch (fixture.case) {
-      case "eligible":
-        if (!commitmentValidation.ok) {
-          decision = { ok: false, code: commitmentValidation.code };
-          break;
-        }
-        if (!controlValidation.ok) {
-          decision = { ok: false, code: controlValidation.code };
-          break;
-        }
-        if (upstream.source16 !== T19_REQUIRED_RESULTS["16"]
-            || upstream.source17 !== T19_REQUIRED_RESULTS["17"]
-            || upstream.source18 !== T19_REQUIRED_RESULTS["18"]) {
-          decision = { ok: false, code: "source-not-ready" };
-        } else {
-          decision = { ok: true };
-        }
-        break;
-      case "live-not-met":
-        decision = { ok: false, code: "live-not-met" };
-        break;
-      case "source-not-ready":
-        decision = { ok: false, code: "source-not-ready" };
-        break;
-      case "pilot-not-met":
-        decision = { ok: false, code: "pilot-not-met" };
-        break;
-      case "missing-support":
-        decision = { ok: false, code: "missing-support-commitment" };
-        break;
-      case "missing-marketplace-control":
-        decision = { ok: false, code: "missing-marketplace-control" };
-        break;
-      case "stale-marketplace-control":
-        decision = { ok: false, code: "stale-marketplace-control" };
-        break;
-      case "hash-invalid-marketplace-control":
-        decision = { ok: false, code: "hash-invalid-marketplace-control" };
-        break;
-      case "publisher-mismatch":
-        decision = { ok: false, code: "publisher-mismatch" };
-        break;
-      default:
-        decision = { ok: false, code: "FIXTURE_INVALID" };
-        break;
-    }
-
-    return {
-      ok: true,
-      decision,
-      commitment: commitmentValidation.ok ? commitmentValidation.commitment : null,
-      marketplaceControl: controlValidation.ok ? controlValidation.control : null,
-      upstream,
-      livePublisherId,
-      ownerPresent: ownerInput !== null,
-      marketplaceControlPresent: marketplaceControlRaw !== null,
-      commitmentValidation,
-      controlValidation,
-      mode: "fixture",
+  // Master evaluator. Pure function over already-parsed state; never
+  // reads filesystem. Walk the priority order; the first failing gate
+  // wins the reason code. The fixture's "case" field, when present,
+  // has no semantic effect.
+  async function t19Evaluate({ ownerInput, standaloneControlRaw,
+    verificationBytes, upstream, fixtureManifestPublisher, liveMode }) {
+    const verdict = {
+      decision: { ok: true },
+      reason: null,
+      reasonDetail: {},
+      commitment: null,
+      ownerControl: null,
+      standaloneControl: null,
+      computedHash: null,
+      manifestPublisherId: "",
+      ownerPublisherId: "",
     };
+
+    // (1) Identity placeholder check: applies BEFORE any other gate.
+    if (t19IsPlainObject(ownerInput) && typeof ownerInput.publisherId === "string") {
+      verdict.ownerPublisherId = ownerInput.publisherId;
+      if (t19ContainsPlaceholder(ownerInput.publisherId)) {
+        verdict.decision = { ok: false, code: T19_REASON.IDENTITY_PLACEHOLDER };
+        verdict.reason = T19_REASON.IDENTITY_PLACEHOLDER;
+        verdict.reasonDetail.where = "owner.publisherId";
+        return verdict;
+      }
+    } else if (t19IsPlainObject(ownerInput)) {
+      verdict.decision = { ok: false, code: T19_REASON.IDENTITY_PLACEHOLDER };
+      verdict.reason = T19_REASON.IDENTITY_PLACEHOLDER;
+      verdict.reasonDetail.where = "owner.publisherId";
+      return verdict;
+    }
+
+    // (2) Resolve the manifest publisher: in fixture mode, the
+    //     manifest publisher is fixture.fixtureManifestPublisher when
+    //     present, otherwise the live package.json publisher.
+    if (!liveMode && t19IsPlainObject(fixtureManifestPublisher)
+      && typeof fixtureManifestPublisher.value === "string"
+      && fixtureManifestPublisher.value.length > 0) {
+      verdict.manifestPublisherId = fixtureManifestPublisher.value;
+    } else {
+      verdict.manifestPublisherId = await t19ReadLiveManifestPublisher();
+    }
+    if (t19ContainsPlaceholder(verdict.manifestPublisherId)) {
+      verdict.decision = { ok: false, code: T19_REASON.IDENTITY_PLACEHOLDER };
+      verdict.reason = T19_REASON.IDENTITY_PLACEHOLDER;
+      verdict.reasonDetail.where = "manifestPublisher";
+      return verdict;
+    }
+
+    // (3) Owner.supportCommitment.
+    const supportValidation = t19ValidateSupport(
+      t19IsPlainObject(ownerInput) ? ownerInput.supportCommitment : null);
+    if (!supportValidation.ok) {
+      verdict.decision = { ok: false, code: supportValidation.code };
+      verdict.reason = supportValidation.code;
+      return verdict;
+    }
+    verdict.commitment = supportValidation.commitment;
+
+    // (4) owner.marketplaceControl strict schema.
+    const ownerControlValidation = t19ValidateOwnerControl(
+      t19IsPlainObject(ownerInput) ? ownerInput.marketplaceControl : null);
+    if (!ownerControlValidation.ok) {
+      verdict.decision = { ok: false, code: ownerControlValidation.code };
+      verdict.reason = ownerControlValidation.code;
+      return verdict;
+    }
+    verdict.ownerControl = ownerControlValidation.control;
+
+    // (5) Standalone marketplace control strict schema.
+    const standaloneValidation = t19ValidateStandaloneControl(standaloneControlRaw);
+    if (!standaloneValidation.ok) {
+      verdict.decision = { ok: false, code: standaloneValidation.code };
+      verdict.reason = standaloneValidation.code;
+      return verdict;
+    }
+    verdict.standaloneControl = standaloneValidation.control;
+
+    // (6) Cross-binding: owner.marketplaceControl == standalone
+    //     control AND each declared hash equals SHA-256 of raw
+    //     output bytes; output bytes contain publisher id + result.
+    const crossBind = t19CrossBind(
+      verdict.ownerControl, verdict.standaloneControl, verificationBytes);
+    if (!crossBind.ok) {
+      verdict.decision = { ok: false, code: crossBind.code };
+      verdict.reason = crossBind.code;
+      return verdict;
+    }
+    verdict.computedHash = crossBind.computedSha256;
+
+    // (7) Manifest identity check: the owner.marketplaceControl.publisherId
+    //     must equal the effective manifest publisher.
+    //     - LIVE mode: package.json#publisher
+    //     - FIXTURE mode: fixtureManifestPublisher (when supplied) OR
+    //       the live package.json#publisher when no fixture override is
+    //       declared.
+    if (verdict.manifestPublisherId
+      && verdict.ownerControl.publisherId !== verdict.manifestPublisherId) {
+      verdict.decision = { ok: false, code: T19_REASON.LIVE_PUBLISHER_MISMATCH };
+      verdict.reason = T19_REASON.LIVE_PUBLISHER_MISMATCH;
+      verdict.reasonDetail.where = liveMode ? "manifestPublisher" : "fixtureManifestPublisher";
+      return verdict;
+    }
+
+    // (8) Upstream: Todo 16/17/18 must each match the EXACT READY/PASS
+    //     string verbatim.
+    const expected = T19_REQUIRED_RESULTS;
+    for (const num of Object.keys(expected)) {
+      const observed = upstream["source" + num];
+      if (observed !== expected[num]) {
+        const code = num === "16"
+          ? T19_REASON.SOURCE_NOT_READY
+          : num === "17"
+          ? T19_REASON.LIVE_NOT_MET
+          : T19_REASON.PILOT_NOT_MET;
+        verdict.decision = { ok: false, code };
+        verdict.reason = code;
+        verdict.reasonDetail.upstream = observed
+          ? `task-${num}:${observed}`
+          : `task-${num}:EVIDENCE_MISSING`;
+        return verdict;
+      }
+    }
+
+    return verdict;
   }
-  async function t19EvaluateLive() {
-    const livePublisherId = await t19ReadLivePublisherId();
-    const upstream = await t19ResolveUpstream(null);
+
+
+  // Dispatcher: locate the fixture flag, parse the JSON, then call
+  // t19Evaluate with content-derived verdict semantics.
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1
+    ? process.argv[3]
+    : process.argv[fixtureFlag + 1];
+  const liveMode = !fixturePath;
+
+  let verdict;
+  if (liveMode) {
     const ownerRead = await t19ReadJsonFile(T19_OWNER_INPUT_PATH);
     const controlRead = await t19ReadJsonFile(T19_MARKETPLACE_CONTROL_PATH);
     const ownerInput = ownerRead.present
-      && t19IsPlainObject(ownerRead.data) && t19IsPlainObject(ownerRead.data.owner)
+      && t19IsPlainObject(ownerRead.data)
+      && t19IsPlainObject(ownerRead.data.owner)
         ? ownerRead.data.owner
         : null;
-    const marketplaceControlRaw = controlRead.present ? controlRead.data : null;
-
-    if (ownerInput === null || marketplaceControlRaw === null) {
-      return {
-        ok: true,
-        decision: { ok: false, code: "input-unavailable" },
-        commitment: null,
-        marketplaceControl: null,
-        upstream,
-        livePublisherId,
-        ownerPresent: ownerInput !== null,
-        marketplaceControlPresent: marketplaceControlRaw !== null,
-        commitmentValidation: { ok: false, code: "missing-support-commitment" },
-        controlValidation: { ok: false, code: "missing-marketplace-control" },
-        mode: "live",
+    const standaloneControlRaw = controlRead.present
+      ? controlRead.data
+      : null;
+    const upstream = await t19ResolveUpstream(null);
+    const verificationBytes = await t19ReadVerificationBytes(null);
+    if (ownerInput === null || standaloneControlRaw === null) {
+      // Deterministic live-today branch. Emit the umbrella reason.
+      verdict = {
+        decision: { ok: false, code: T19_REASON.INPUT_UNAVAILABLE },
+        reason: T19_REASON.INPUT_UNAVAILABLE,
+        reasonDetail: {},
+        commitment: null, ownerControl: null, standaloneControl: null,
+        computedHash: null, manifestPublisherId: "", ownerPublisherId: "",
       };
-    }
-
-    const commitmentValidation = t19ValidateSupport(ownerInput.supportCommitment);
-    const controlValidation = await t19ValidateMarketplaceControl(
-      marketplaceControlRaw,
-      livePublisherId,
-      null,
-    );
-
-    let decision;
-    if (!commitmentValidation.ok) {
-      decision = { ok: false, code: commitmentValidation.code };
-    } else if (!controlValidation.ok) {
-      decision = { ok: false, code: controlValidation.code };
-    } else if (upstream.source16 !== T19_REQUIRED_RESULTS["16"]
-        || upstream.source17 !== T19_REQUIRED_RESULTS["17"]
-        || upstream.source18 !== T19_REQUIRED_RESULTS["18"]) {
-      decision = { ok: false, code: "source-not-ready" };
     } else {
-      decision = { ok: true };
+      verdict = await t19Evaluate({
+        ownerInput,
+        standaloneControlRaw,
+        verificationBytes,
+        upstream,
+        fixtureManifestPublisher: null,
+        liveMode: true,
+      });
     }
-
-    return {
-      ok: true,
-      decision,
-      commitment: commitmentValidation.ok ? commitmentValidation.commitment : null,
-      marketplaceControl: controlValidation.ok ? controlValidation.control : null,
-      upstream,
-      livePublisherId,
-      ownerPresent: true,
-      marketplaceControlPresent: true,
-      commitmentValidation,
-      controlValidation,
-      mode: "live",
-    };
-  }
-
-  const fixtureFlag = process.argv.indexOf("--fixture");
-  const fixturePath =
-    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
-  const liveMode = !fixturePath;
-
-  let fixtureParsed = null;
-  if (!liveMode) {
-    try {
-      fixtureParsed = JSON.parse(
-        await readFile(resolve(process.cwd(), fixturePath), "utf8"),
-      );
-    } catch {
-      fixtureParsed = null;
-    }
-  }
-
-  const verdict = liveMode
-    ? await t19EvaluateLive()
-    : await t19EvaluateFixture(fixtureParsed ?? {});
-
-  if (!verdict.ok) {
-    console.log(`DEFER MARKETPLACE PUBLICATION: ${verdict.code}`);
-    process.exitCode = 1;
-  } else if (!verdict.decision.ok) {
-    console.log("DEFER MARKETPLACE PUBLICATION");
-    console.error(`reason=${verdict.decision.code}`);
-    if (verdict.upstream) {
-      const tags = [];
-      for (const num of Object.keys(T19_REQUIRED_RESULTS)) {
-        const key = "source" + num;
-        if (verdict.upstream[key]
-            && verdict.upstream[key] !== T19_REQUIRED_RESULTS[num]) {
-          tags.push(`${t19TokenForSource(verdict.upstream[key])}: ${verdict.upstream[key]}`);
-        }
-      }
-      if (tags.length > 0) {
-        console.error(`upstream=${tags.join("|")}`);
-      }
-    }
-    process.exitCode = 1;
   } else {
-    console.log("MARKETPLACE ELIGIBLE FOR OWNER-APPROVED 0.1.0 PREVIEW");
-    if (verdict.marketplaceControl) {
-      console.error(`publisherId=${verdict.marketplaceControl.publisherId}`);
-      console.error(`verifiedAt=${verdict.marketplaceControl.verifiedAt}`);
+    let fixture;
+    try {
+      const body = await readFile(resolve(process.cwd(), fixturePath), "utf8");
+      fixture = JSON.parse(body);
+    } catch {
+      fixture = null;
+    }
+    if (!t19IsPlainObject(fixture)) {
+      console.log("DEFER MARKETPLACE PUBLICATION: FIXTURE_INVALID");
+      console.error("reason=FIXTURE_INVALID");
+      console.error("where=fixture-shape-invalid");
+      process.exitCode = 1;
+      process.exit(process.exitCode);
+    } else {
+      // Extract the declared fixture manifest publisher (if any).
+      const declaredManifestPublisher = t19IsPlainObject(fixture)
+        && typeof fixture[T19_FIXTURE_MANIFEST_PUBLISHER_FIELD] === "string"
+        && fixture[T19_FIXTURE_MANIFEST_PUBLISHER_FIELD].length > 0
+          ? { value: fixture[T19_FIXTURE_MANIFEST_PUBLISHER_FIELD] }
+          : null;
+
+      const ownerInput = t19IsPlainObject(fixture.owner)
+        ? fixture.owner
+        : null;
+      const standaloneControlRaw = t19IsPlainObject(
+        fixture.marketplaceControl)
+        ? fixture.marketplaceControl
+        : null;
+      const upstream = await t19ResolveUpstream(fixture);
+      const verificationBytes = await t19ReadVerificationBytes(fixture);
+
+      // FIXTURE_INVALID: a content-driven check for malformed fixtures.
+      // The fixture is malformed when ALL of the documented content
+      // blocks are absent -- there is no meaningful state from which the
+      // evaluator can derive a verdict. This is independent of the
+      // optional `case` documentation field.
+      const fixtureHasContent = ownerInput !== null
+        || standaloneControlRaw !== null
+        || (t19IsPlainObject(fixture.marketplaceVerification)
+          && typeof fixture.marketplaceVerification.text === "string"
+          && fixture.marketplaceVerification.text.length > 0)
+        || (t19IsPlainObject(fixture.upstream)
+          && Object.keys(fixture.upstream).length > 0);
+
+      if (!fixtureHasContent) {
+        verdict = {
+          decision: { ok: false, code: "FIXTURE_INVALID" },
+          reason: "FIXTURE_INVALID",
+          reasonDetail: { where: "fixture-content-absent" },
+          commitment: null, ownerControl: null, standaloneControl: null,
+          computedHash: null, manifestPublisherId: "", ownerPublisherId: "",
+        };
+      } else {
+        verdict = await t19Evaluate({
+          ownerInput,
+          standaloneControlRaw,
+          verificationBytes,
+          upstream,
+          fixtureManifestPublisher: declaredManifestPublisher,
+          liveMode: false,
+        });
+      }
     }
   }
 
+  if (verdict && verdict.reason === "FIXTURE_INVALID") {
+    console.log("DEFER MARKETPLACE PUBLICATION: FIXTURE_INVALID");
+    console.error(`reason=${verdict.reason}`);
+    if (verdict.reasonDetail && verdict.reasonDetail.where) {
+      console.error(`where=${verdict.reasonDetail.where}`);
+    }
+    process.exitCode = 1;
+    process.exit(process.exitCode);
+  }
+
+  if (verdict.decision.ok) {
+    console.log("MARKETPLACE ELIGIBLE FOR OWNER-APPROVED 0.1.0 PREVIEW");
+    const ctrl = verdict.standaloneControl || verdict.ownerControl;
+    if (ctrl) {
+      console.error(`publisherId=${ctrl.publisherId}`);
+      console.error(`verifiedAt=${ctrl.verifiedAt}`);
+    }
+    process.exit(0);
+  }
+
+  console.log("DEFER MARKETPLACE PUBLICATION");
+  console.error(`reason=${verdict.reason}`);
+  if (verdict.reasonDetail && verdict.reasonDetail.upstream) {
+    console.error(`upstream=${verdict.reasonDetail.upstream}`);
+  } else if (verdict.reasonDetail && verdict.reasonDetail.where) {
+    console.error(`where=${verdict.reasonDetail.where}`);
+  }
+  process.exitCode = 1;
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "case": "eligible",
-  "expectedReason": null,
+  "case": "upstream-malformed",
+  "expectedReason": "source-not-ready",
   "now": "2026-07-16T12:00:00Z",
   "upstream": {
-    "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
+    "16": "# report metadata",
     "17": "LIVE GATE PASS",
     "18": "PILOT GATE PASS"
   },
@@ -34,6 +34,5 @@
   "marketplaceVerification": {
     "text": "publisher: synthetic-mysql-preview\nresult: publisher-control-verified\n"
   },
-  "description": "Synthetic eligible data with an explicit non-placeholder manifest publisher.",
   "fixtureManifestPublisher": "synthetic-mysql-preview"
 }

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "case": "eligible",
-  "expectedReason": null,
+  "case": "output-publisher",
+  "expectedReason": "verification-output-mismatch",
   "now": "2026-07-16T12:00:00Z",
   "upstream": {
     "16": "PUBLIC SOURCE READY FOR OWNER ACTION",
@@ -20,7 +20,7 @@
       "publisherId": "synthetic-mysql-preview",
       "verifiedAt": "2026-07-10T00:00:00Z",
       "artifactPath": ".omo/inputs/marketplace-control.json",
-      "verificationArtifactSha256": "4d9c3485abcd7a703f85ab969d66a928b19df147b2b42ad224448ee4ee0486dc"
+      "verificationArtifactSha256": "53f764585469c2dfa413d5d647e11b854bf5adb669a0ffcfacc1b528bb5e74ba"
     }
   },
   "marketplaceControl": {
@@ -28,12 +28,11 @@
     "publisherId": "synthetic-mysql-preview",
     "verifiedAt": "2026-07-10T00:00:00Z",
     "verificationOutputPath": ".omo/inputs/marketplace-verification.txt",
-    "verificationOutputSha256": "4d9c3485abcd7a703f85ab969d66a928b19df147b2b42ad224448ee4ee0486dc",
+    "verificationOutputSha256": "53f764585469c2dfa413d5d647e11b854bf5adb669a0ffcfacc1b528bb5e74ba",
     "result": "publisher-control-verified"
   },
   "marketplaceVerification": {
-    "text": "publisher: synthetic-mysql-preview\nresult: publisher-control-verified\n"
+    "text": "publisher: synthetic-other-publisher\nresult: publisher-control-verified\n"
   },
-  "description": "Synthetic eligible data with an explicit non-placeholder manifest publisher.",
   "fixtureManifestPublisher": "synthetic-mysql-preview"
 }

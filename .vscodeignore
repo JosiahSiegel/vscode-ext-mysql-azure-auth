@@ -1,20 +1,49 @@
+# Build/test/tooling artefacts
 .vscode/**
 src/**
 src/test/mocks/**
 node_modules/**
 .gitignore
+.gitattributes
 tsconfig.json
 .eslintrc.js
+.eslintignore
+.prettierrc*
+.editorconfig
 *.map
 out/main.js.map
-**/*.test.js
 out/test/**
-.github/**
+**/*.test.js
+**/*.test.ts
+**/*.test.d.ts
 .vscode-test/**
+.vscodeignore
 esbuild.config.test.js
 esbuild.config.integration.js
-.omo/
+.omo/**
 .playwright-mcp/**
-out/
 *.log
-*.txt
+*.vsix
+.DS_Store
+Thumbs.db
+
+# Stray root-level test artefacts (intentionally not tracked)
+foofoo.txt
+package-validator-fixture-*.txt
+
+# Tool binaries downloaded by scripts/run-gitleaks.mjs — never ship
+.tools/**
+
+# Repo maintenance + dev docs (NOT user-facing; not part of the published extension)
+.github/**
+docs/**
+test/**
+scripts/**
+BUILD.md
+CONTRIBUTING.md
+SECURITY.md
+SUPPORT.md
+
+# Ship compiled extension code only
+out/*
+!out/main.js

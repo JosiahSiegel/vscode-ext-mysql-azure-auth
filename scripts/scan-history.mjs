@@ -20,6 +20,31 @@
 
 import { spawnFile, spawnLine } from "./lib/git-run.mjs";
 
+// Reserved / placeholder / docs domains. Real PII should never land
+// on these TLDs (RFC 6761 reserves .invalid and .example; .test/.localhost
+// are also reserved). The explicit allowlist below catches well-known
+// template/synthetic addresses used in docs, fixtures, and tooling so the
+// generic-email rule fires on real-looking addresses only.
+const PLACEHOLDER_EMAIL_DOMAINS = new Set([
+  "example.com",
+  "example.invalid",
+  "example.org",
+  "example.net",
+  "your-tenant.com",
+  "your-tenant.onmicrosoft.com",
+  "contoso.com",
+  "izs.me",            // npm maintainer email, appears in lockfile deprecation notices
+  "XXXXXXXX.com",      // removed historical contamination
+  "synthetic-owner.example",
+]);
+
+function looksLikePlaceholderEmail(address) {
+  const at = address.lastIndexOf("@");
+  if (at < 0) return false;
+  const domain = address.slice(at + 1).toLowerCase();
+  return PLACEHOLDER_EMAIL_DOMAINS.has(domain);
+}
+
 const PII_RULES = [
   {
     id: "pii-email-XXXXXXXX",
@@ -28,8 +53,15 @@ const PII_RULES = [
   },
   {
     id: "pii-email-generic",
-    pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/u,
+    // Match anything that looks like an email, then filter out reserved
+    // / template / docs addresses via looksLikePlaceholderEmail. This keeps
+    // the rule's intent (catch real PII leaks) without false-positives on
+    // CONTRIBUTING.md templates ("your.email@example.com"), connection-form
+    // placeholders ("name@your-tenant.onmicrosoft.com"), npm lockfile
+    // deprecation strings ("i@izs.me"), or fixture emails ("fixture@example.invalid").
+    pattern: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/gu,
     label: "embedded email address",
+    isExcluded: looksLikePlaceholderEmail,
   },
 ];
 
@@ -69,9 +101,13 @@ function blobFindings(bytes) {
   const text = bytes.toString("binary");
   const findings = [];
   for (const rule of ALL_RULES) {
-    if (rule.pattern.test(text)) {
-      findings.push({ ruleId: rule.id, ruleLabel: rule.label });
+    if (!rule.pattern.test(text)) continue;
+    if (typeof rule.isExcluded === "function") {
+      const matches = text.match(rule.pattern);
+      const allExcluded = matches !== null && matches.every((m) => rule.isExcluded(m));
+      if (allExcluded) continue;
     }
+    findings.push({ ruleId: rule.id, ruleLabel: rule.label });
   }
   return findings;
 }
@@ -115,6 +151,15 @@ async function readBlobBytes(id) {
   return Buffer.from(proc.stdout, "binary");
 }
 
+async function isBlob(id) {
+  // `git rev-list --objects` returns commit, tree, AND blob SHAs interleaved.
+  // We must skip commits and trees here or readBlobBytes will refuse them
+  // (cat-file blob exits 1 on non-blob objects) and they will all be
+  // reported as "unreadable", producing a false HISTORY SCAN INCOMPLETE.
+  const proc = await spawnFile("git", ["cat-file", "-t", id], { allowExitCodes: new Set([0, 1, 128]) });
+  return proc.exitCode === 0 && proc.stdout.trim() === "blob";
+}
+
 function emitClean(extra) {
   const suffix = extra ? ` (with ${extra} reflog blobs unreachable)` : "";
   process.stdout.write(`HISTORY CLEAN${suffix}\n`);
@@ -154,13 +199,14 @@ async function main() {
       unreadable.push({ blobId: id, reason: "cat-file -e failed; object not reachable from this repository" });
       continue;
     }
+    if (!(await isBlob(id))) continue; // skip commits, trees, tags
     const bytes = await readBlobBytes(id);
     if (bytes === null) {
       unreadable.push({ blobId: id, reason: "cat-file blob failed; object unreadable" });
       continue;
     }
     if (bytes.length === 0) continue;
-    if (bytes.includes(0)) continue; // skip binary blobs (commits, trees, packed binary)
+    if (bytes.includes(0)) continue; // skip binary blobs
     const findings = blobFindings(bytes);
     if (findings.length > 0) {
       sensitive.push({ blobId: id, reasons: summariseLabels(findings) });

@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "from": "task-14-blockers",
+  "notes": "Marker fixture that tells Todo 15's validator to inherit .omo/evidence/task-14-blockers.json verbatim. Today's task-14 blockers are the four upstream NOT-READY results, so the validator must emit RELEASE NOT READY: UPSTREAM_PACKAGE_BLOCKED with exit 1."
+}

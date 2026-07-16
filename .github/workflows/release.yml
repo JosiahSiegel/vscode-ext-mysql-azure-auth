@@ -1,0 +1,87 @@
+name: Release Preview
+
+# Controlled preview release — dry-run only.
+#
+# This workflow never publishes to the VS Code Marketplace and never
+# pushes to a remote. It validates the release-pipeline gates on the
+# current commit so the owner can confirm a clean dry-run before any
+# real distribution step is taken manually.
+#
+# Trigger model:
+#   - workflow_dispatch: manual, owner-initiated run only.
+#     No `push:` / `pull_request:` / `schedule:` / external triggers.
+#
+# Permission model:
+#   - Job declares `permissions: contents: read` so a workflow compromise
+#     cannot push, edit, or read PR-side secrets.
+#   - Repository-wide `permissions: {}` mirrors the CI gate from
+#     .github/workflows/ci.yml.
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Free-form reason for the dry-run (recorded only)."
+        required: false
+        type: string
+        default: "owner-initiated preview dry-run"
+
+permissions: {}
+
+concurrency:
+  group: release-preview-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-preview:
+    name: Release Preview (dry-run)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.16.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Preflight (Todo 14 package gate)
+        # Todo 14's deterministic gate decides whether PACKAGE READY is
+        # achievable on this commit. When upstream gates (Todo 1/3/4/12)
+        # are NOT READY, the package validator emits
+        # PACKAGE NOT BUILT: UPSTREAM_BLOCKER and exits 1; that is
+        # accepted by the plan body and surfaces here as a non-zero exit.
+        run: node scripts/verify-task.mjs 14
+        continue-on-error: true
+
+      - name: Release gate (Todo 15)
+        # Todo 15's release gate inherits Todo 14's blockers list. Today's
+        # machine result is RELEASE NOT READY: UPSTREAM_PACKAGE_BLOCKED;
+        # that is a plan-accepted outcome. The workflow never auto-publishes.
+        run: node scripts/verify-task.mjs 15
+        continue-on-error: true
+
+      - name: Render supported platforms (dry-run)
+        # Reads optional .omo/inputs/platform-ci.json. When absent
+        # (the default state), exits 2 with PLATFORM SUPPORT NOT READY.
+        run: node scripts/render-supported-platforms.mjs
+        continue-on-error: true
+
+      - name: Upload dry-run evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-preview-dry-run
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            .omo/evidence/task-15-*.txt
+            .omo/evidence/task-15-*.json

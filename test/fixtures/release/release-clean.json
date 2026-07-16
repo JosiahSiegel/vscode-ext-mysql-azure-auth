@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "clean": true,
+  "notes": "Synthetic-future clean fixture for Todo 15's RELEASE READY exit-0 branch. This fixture does NOT fabricate real evidence; it supplies a minimal platformFixture object that scripts/render-supported-platforms.mjs validates end-to-end. The platformFixture object below is shaped so the renderer's loader accepts it AND at least one run passes the per-OS process.arch expectation. The renderer resolves logPath against the working directory; this fixture therefore runs the validator from the repo root and the file paths below point at the synthetic log blobs that ship alongside this fixture.",
+  "platformFixture": {
+    "schemaVersion": 1,
+    "sourceCommit": "0000000000000000000000000000000000000000",
+    "runs": [
+      {
+        "os": "ubuntu-x64",
+        "conclusion": "success",
+        "completedAt": "2026-07-15T00:00:00.000Z",
+        "logPath": "test/fixtures/release/platform-ci/ubuntu-x64.log",
+        "logSha256": "6fafea1516ae4b6dc67668e339b7995b47b7692a6a7af0e9c5714dd81e810c02"
+      }
+    ]
+  }
+}

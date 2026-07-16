@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "from": "task-14-blockers",
+  "expectedPlatformNotReady": true,
+  "notes": "Marker fixture that simulates an empty blockers array AND zero successful platform-ci runs. Used to exercise the RELEASE NOT READY: PLATFORM_SUPPORT_NOT_READY exit 1 branch. The validator intentionally does NOT consult .omo/inputs/platform-ci.json for this branch — the override short-circuits to a zero-runs verdict."
+}

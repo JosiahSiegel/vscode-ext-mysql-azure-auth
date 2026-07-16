@@ -3149,6 +3149,326 @@ if (!invokedDirectly) {
       }
     }
   }
+} else if (task === "15") {
+  /* Todo 15 — controlled preview release gate.
+   *
+   * Honest machine-result matrix (today):
+   *
+   *   - `RELEASE READY` exit 0
+   *       Reachable only when ALL of these hold simultaneously:
+   *         (1) Every Todo 1..13 result is READY (i.e.
+   *             .omo/evidence/task-14-blockers.json is absent OR carries
+   *             an empty blockers array), AND
+   *         (2) .omo/inputs/platform-ci.json is present AND
+   *         (3) At least one run is successful AND passes the per-OS
+   *             `process.arch` check enforced by
+   *             scripts/render-supported-platforms.mjs.
+   *       Today's state fails (1) because Todo 1 / 3 / 4 / 12 are
+   *       NOT READY. The plan body documents this branch as a
+   *       synthetic-future outcome only.
+   *
+   *   - `RELEASE NOT READY: UPSTREAM_PACKAGE_BLOCKED` exit 1
+   *       The honest today-branch. Triggered when
+   *       .omo/evidence/task-14-blockers.json is present and non-empty.
+   *       The blockers array is echoed to
+   *       .omo/evidence/task-15-blockers.json when the inherited
+   *       evidence is missing or differs from this run's local view.
+   *
+   *   - `RELEASE NOT READY: PLATFORM_SUPPORT_NOT_READY` exit 1
+   *       Reachable when upstream blockers are empty BUT either
+   *       .omo/inputs/platform-ci.json is absent OR no successful run
+   *       passes the arch check.
+   *
+   *   - `RELEASE NOT READY: FIXTURE_INVALID` exit 1
+   *       Triggered on a malformed fixture input OR a malformed
+   *       platform-ci.json (when one is supplied).
+   *
+   * Execution modes:
+   *
+   *   (a) Live mode (no --fixture):
+   *       Reads .omo/evidence/task-14-blockers.json if present, then
+   *       invokes the renderer helper from
+   *       scripts/render-supported-platforms.mjs against the live
+   *       .omo/inputs/platform-ci.json. Today's run inherits the four
+   *       upstream blockers from Todo 14 and emits
+   *       RELEASE NOT READY: UPSTREAM_PACKAGE_BLOCKED.
+   *
+   *   (b) Fixture mode (--fixture <path>):
+   *       The fixture carries a small set of mode flags:
+   *         - { "from": "task-14-blockers" }
+   *           Inherit the on-disk task-14-blockers.json verbatim.
+   *         - { "expectedPlatformNotReady": true }
+   *           Override: blockers become empty, but platform-ci.json is
+   *           treated as absent / having zero successful runs.
+   *         - { "clean": true, "platformFixture": { schemaVersion, sourceCommit, runs: [...] } }
+   *           Synthetic-future clean branch. The validator still
+   *           verifies the supplied platformFixture object so a
+   *           malformed blob falls through to FIXTURE_INVALID.
+   *         - { "expectedPlatformInvalid": true }
+   *           Triggers FIXTURE_INVALID.
+   *       The fixture itself never fabricates real evidence; it only
+   *       shapes which validator branch the run exercises.
+   */
+  const RELEASE_PLATFORM_INPUT_PATH = ".omo/inputs/platform-ci.json";
+  const RELEASE_FIXTURE_CASES = new Set([
+    "upstream-blocked",
+    "platform-not-ready",
+    "clean",
+    "fixture-invalid",
+  ]);
+  const RELEASE_TASK14_BLOCKERS_PATH = ".omo/evidence/task-14-blockers.json";
+  const RELEASE_TASK15_BLOCKERS_PATH = ".omo/evidence/task-15-blockers.json";
+
+  /**
+   * Read and parse the inherited task-14 blockers file. Returns either
+   *   { ok: true, blockers: string[] }
+   * when the file is parseable AND every entry is a string, or
+   *   { ok: false, code: "FIXTURE_INVALID" }
+   * when the file is malformed or carries a non-array / non-string entry.
+   *
+   * @param {string} path
+   */
+  async function readTask14Blockers(path) {
+    let raw;
+    try {
+      raw = await readFile(resolve(process.cwd(), path), "utf8");
+    } catch {
+      return { ok: true, blockers: [], present: false };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, code: "FIXTURE_INVALID" };
+    }
+    if (!Array.isArray(parsed)) {
+      return { ok: false, code: "FIXTURE_INVALID" };
+    }
+    for (const entry of parsed) {
+      if (typeof entry !== "string") {
+        return { ok: false, code: "FIXTURE_INVALID" };
+      }
+    }
+    return { ok: true, blockers: parsed, present: true };
+  }
+
+  /**
+   * Resolve the platform support verdict by delegating to
+   * scripts/render-supported-platforms.mjs's loader. The renderer
+   * enforces the schema, the per-log SHA-256 binding, and the
+   * per-OS `process.arch` expectation.
+   *
+   * @param {string} inputPath
+   */
+  async function evaluatePlatformSupport(inputPath) {
+    const rendererPath = resolve(
+      process.cwd(),
+      "scripts",
+      "render-supported-platforms.mjs",
+    );
+    const rendererUrl = pathToFileURL(rendererPath).href;
+    const mod = await import(rendererUrl);
+    return mod.loadAndValidateFixture(inputPath);
+  }
+  void evaluatePlatformSupport;
+
+  /**
+   * Persist the inherited blockers verbatim when they differ from the
+   * existing on-disk file. Returns true when a write happened so the
+   * evidence ledger can record it.
+   *
+   * @param {string[]} blockers
+   */
+  async function persistTask15Blockers(blockers) {
+    let existing = null;
+    try {
+      const raw = await readFile(
+        resolve(process.cwd(), RELEASE_TASK15_BLOCKERS_PATH),
+        "utf8",
+      );
+      existing = JSON.parse(raw);
+    } catch {
+      existing = null;
+    }
+    const same =
+      Array.isArray(existing) &&
+      existing.length === blockers.length &&
+      existing.every((entry, i) => entry === blockers[i]);
+    if (same) return false;
+    const { writeFile, mkdir } = await import("node:fs/promises");
+    await mkdir(resolve(process.cwd(), ".omo/evidence"), { recursive: true });
+    await writeFile(
+      resolve(process.cwd(), RELEASE_TASK15_BLOCKERS_PATH),
+      JSON.stringify(blockers, null, 2) + "\n",
+      "utf8",
+    );
+    return true;
+  }
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath =
+    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const liveMode = !fixturePath;
+
+  /**
+   * Apply the live-mode branch: read task-14 blockers, then evaluate
+   * platform support via the renderer.
+   *
+   * @returns {Promise<{ok: true, blockers: string[], validRuns: number} | {ok: false, code: string, message: string}>}
+   */
+  async function evaluateLive() {
+    const blockerResult = await readTask14Blockers(RELEASE_TASK14_BLOCKERS_PATH);
+    if (!blockerResult.ok) {
+      return { ok: false, code: "FIXTURE_INVALID", message: blockerResult.code };
+    }
+    if (blockerResult.blockers.length > 0) {
+      // Upstream gates are NOT READY. Echo the blockers array verbatim
+      // to .omo/evidence/task-15-blockers.json (best-effort) so the
+      // evidence ledger sees the inheritance. We do NOT touch the
+      // platform-ci.json / renderer here because the upstream blockers
+      // already short-circuit the verdict.
+      await persistTask15Blockers(blockerResult.blockers);
+      return {
+        ok: true,
+        blockers: blockerResult.blockers,
+        validRuns: 0,
+      };
+    }
+    // Upstream blockers empty; evaluate platform support.
+    let platformResult;
+    try {
+      platformResult = await evaluatePlatformSupport(RELEASE_PLATFORM_INPUT_PATH);
+    } catch {
+      return { ok: false, code: "FIXTURE_INVALID", message: "PLATFORM_LOADER_FAIL" };
+    }
+    if (!platformResult.ok) {
+      // A malformed / hash-mismatched platform-ci.json counts as
+      // FIXTURE_INVALID per the plan body (the fixture branch
+      // `expectedPlatformInvalid: true` exercises the same code path).
+      return { ok: false, code: "FIXTURE_INVALID", message: platformResult.code };
+    }
+    if (platformResult.validRuns.length === 0) {
+      return { ok: true, blockers: [], validRuns: 0 };
+    }
+    return {
+      ok: true,
+      blockers: [],
+      validRuns: platformResult.validRuns.length,
+    };
+  }
+
+  /**
+   * Apply the fixture-mode branch.
+   *
+   * @param {string} fixturePath
+   */
+  async function evaluateFixtureMode(fixturePath) {
+    let fixture = null;
+    try {
+      const raw = await readFile(resolve(process.cwd(), fixturePath), "utf8");
+      fixture = JSON.parse(raw);
+    } catch {
+      return { ok: false, code: "FIXTURE_INVALID", message: "PARSE_FAIL" };
+    }
+    if (!isPlainObject(fixture)) {
+      return { ok: false, code: "FIXTURE_INVALID", message: "SHAPE" };
+    }
+
+    // (1) explicit FIXTURE_INVALID fixture overrides every other branch.
+    if (fixture.expectedPlatformInvalid === true) {
+      return { ok: false, code: "FIXTURE_INVALID", message: "EXPLICIT" };
+    }
+
+    // (2) synthetic-future clean branch. The fixture must carry a
+    //     platformFixture that passes the renderer's loader, AND must
+    //     claim clean upstream state (empty blockers). We materialise
+    //     the synthetic fixture to a temp path and let the renderer
+    //     parse + arch-check it end-to-end, so a malformed blob
+    //     surfaces as FIXTURE_INVALID instead of slipping through.
+    if (fixture.clean === true) {
+      const synthetic = isPlainObject(fixture.platformFixture)
+        ? fixture.platformFixture
+        : null;
+      if (!synthetic) {
+        return { ok: false, code: "FIXTURE_INVALID", message: "MISSING_PLATFORM_FIXTURE" };
+      }
+      const { writeFile, mkdir, rm } = await import("node:fs/promises");
+      const tmpDir = resolve(process.cwd(), ".omo/evidence/release-t15-clean");
+      const tmpPath = resolve(tmpDir, "platform-ci.json");
+      try {
+        await rm(tmpDir, { recursive: true, force: true });
+        await mkdir(tmpDir, { recursive: true });
+        await writeFile(tmpPath, JSON.stringify(synthetic, null, 2), "utf8");
+        const platformResult = await evaluatePlatformSupport(
+          ".omo/evidence/release-t15-clean/platform-ci.json",
+        );
+        if (!platformResult.ok) {
+          return { ok: false, code: "FIXTURE_INVALID", message: platformResult.code };
+        }
+        if (platformResult.validRuns.length === 0) {
+          return { ok: true, blockers: [], validRuns: 0, branch: "clean-but-empty" };
+        }
+        return {
+          ok: true,
+          blockers: [],
+          validRuns: platformResult.validRuns.length,
+          branch: "clean",
+        };
+      } finally {
+        try { await rm(tmpDir, { recursive: true, force: true }); } catch { /* noop */ }
+      }
+    }
+
+    // (3) platform-not-ready fixture: simulate an empty blockers array
+    //     AND zero successful runs by leaving the platform-ci.json
+    //     path absent.
+    if (fixture.expectedPlatformNotReady === true) {
+      return { ok: true, blockers: [], validRuns: 0 };
+    }
+
+    // (4) upstream-blocked fixture (default branch): inherit the
+    //     task-14 blockers file verbatim.
+    if (fixture.from === "task-14-blockers" || fixture.from === undefined) {
+      const blockerResult = await readTask14Blockers(RELEASE_TASK14_BLOCKERS_PATH);
+      if (!blockerResult.ok) {
+        return { ok: false, code: "FIXTURE_INVALID", message: blockerResult.code };
+      }
+      await persistTask15Blockers(blockerResult.blockers);
+      return {
+        ok: true,
+        blockers: blockerResult.blockers,
+        validRuns: 0,
+      };
+    }
+
+    return { ok: false, code: "FIXTURE_INVALID", message: "UNKNOWN_FIXTURE" };
+  }
+
+  let verdict;
+  if (liveMode) {
+    verdict = await evaluateLive();
+  } else {
+    verdict = await evaluateFixtureMode(fixturePath);
+  }
+
+  if (!verdict.ok) {
+    console.log(`RELEASE NOT READY: ${verdict.code}`);
+    if (verdict.message) console.error(`reason=${verdict.message}`);
+    process.exitCode = 1;
+  } else if (verdict.blockers.length > 0) {
+    // Inherit upstream blockers verbatim. The plan body accepts this
+    // deterministic NOT-READY branch as the honest today-state.
+    console.log("RELEASE NOT READY: UPSTREAM_PACKAGE_BLOCKED");
+    if (verdict.blockers.length > 0) {
+      console.error(`blockers=${verdict.blockers.join("|")}`);
+    }
+    process.exitCode = 1;
+  } else if (verdict.validRuns === 0) {
+    console.log("RELEASE NOT READY: PLATFORM_SUPPORT_NOT_READY");
+    process.exitCode = 1;
+  } else {
+    console.log("RELEASE READY");
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

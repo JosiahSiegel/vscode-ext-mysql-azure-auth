@@ -1,0 +1,18 @@
+{
+  "pass": true,
+  "host": "example-flexible-server.mysql.database.azure.com",
+  "port": "3306",
+  "database": "information_schema",
+  "user": "<synthetic-username-stub>",
+  "azureLive": {
+    "tenant": "<synthetic-tenant-stub>",
+    "subscription": "<synthetic-subscription-stub>",
+    "resourceGroup": "<synthetic-resource-group-stub>",
+    "server": "example-flexible-server"
+  },
+  "simulate": {
+    "tlsVerified": true,
+    "mutationAccepted": false,
+    "disconnectIdempotent": true
+  }
+}

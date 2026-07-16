@@ -3895,6 +3895,293 @@ if (!invokedDirectly) {
     console.error(`blockers=${verdict.blockers.join("|")}`);
     process.exitCode = 1;
   }
+} else if (task === "17") {
+  /* Todo 17 — optional production-path Azure live gate.
+   *
+   * Honest machine-result matrix:
+   *
+   *   - `LIVE GATE PASS` exit 0
+   *       Reachable only when EVERY precondition holds AND the
+   *       sanitized harness returns PASS:
+   *         (1) `.omo/inputs/project-direction-open-source.json` exists
+   *             and the parsed JSON carries an `azureLive` key.
+   *         (2) `MYSQL_HOST` env var is set.
+   *         (3) `MYSQL_PORT` env var is set.
+   *         (4) `MYSQL_DATABASE` env var is set.
+   *         (5) `MYSQL_USER` env var is set.
+   *       With all five present, the harness stub at
+   *       `scripts/azure-live-harness.mjs` is invoked. The stub:
+   *         - normalizes host via trim+lowercase+trailing-dot-strip
+   *         - asserts host.endsWith('.mysql.database.azure.com') with
+   *           a non-empty label before the suffix
+   *         - opens an `mysql2` connection with
+   *           `ssl: { rejectUnauthorized: true }`
+   *         - runs `SHOW DATABASES` then `SELECT 1`
+   *         - confirms read-only mode via the Todo 9 classifier
+   *         - disconnects idempotently
+   *       On PASS, the validator emits `LIVE GATE PASS` exit 0.
+   *       The orchestrator environment today lacks every input, so
+   *       this branch is synthetic-future only.
+   *
+   *   - `LIVE GATE FAIL: <code>` exit 1
+   *       Harness-level failure (e.g. host not in the Azure suffix,
+   *       TLS verification failed, classifier rejected a mutating
+   *       statement, disconnect idempotency violation). Code is
+   *       emitted by the harness on stderr-shaped stdout.
+   *
+   *   - `LIVE GATE NOT MET: INPUT UNAVAILABLE` exit 1
+   *       Deterministic today-state. Triggered when ANY precondition
+   *       is missing. The four missing preconditions are surfaced on
+   *       stderr as a single pipe-delimited line. The plan body
+   *       explicitly accepts this as a valid task completion; it does
+   *       NOT cause Marketplace defer (Todo 19 owns that decision).
+   *
+   * Execution modes:
+   *
+   *   (a) Live mode (no --fixture):
+   *       Preflights `.omo/inputs/project-direction-open-source.json`
+   *       AND the four env vars. Missing inputs emit
+   *       `LIVE GATE NOT MET: INPUT UNAVAILABLE` exit 1 with the
+   *       list of missing preconditions on stderr.
+   *
+   *   (b) Fixture mode (--fixture <path>):
+   *       The fixture carries an explicit branch tag and the values
+   *       the live branch would have read from the inputs/env:
+   *         - `{}` → branch: INPUT_UNAVAILABLE → exit 1
+   *         - `{ "pass": true, ...synthetic... }` → branch: PASS → exit 0
+   *         - `{ "pass": false, "code": "<X>" }` → branch: FAIL:X → exit 1
+   *       The fixture mode NEVER reads env vars (deterministic).
+   */
+  const AZURE_INPUT_PATH = ".omo/inputs/project-direction-open-source.json";
+  const AZURE_REQUIRED_ENV = Object.freeze([
+    "MYSQL_HOST",
+    "MYSQL_PORT",
+    "MYSQL_DATABASE",
+    "MYSQL_USER",
+  ]);
+
+  /**
+   * Read the optional azureLive input contract. Returns
+   *   { ok: true, present: boolean, azureLive: object|null }
+   * Never throws — the missing-file branch is the deterministic
+   * today-state.
+   *
+   * @returns {Promise<{ok: true, present: boolean, azureLive: object|null}>}
+   */
+  async function readAzureLiveInput() {
+    let raw;
+    try {
+      raw = await readFile(resolve(process.cwd(), AZURE_INPUT_PATH), "utf8");
+    } catch {
+      return { ok: true, present: false, azureLive: null };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      // Malformed input contract is treated as absent (the plan body
+      // mandates we do NOT fabricate owner identity; a malformed
+      // contract is functionally equivalent to absent).
+      return { ok: true, present: false, azureLive: null };
+    }
+    if (!isPlainObject(parsed)) {
+      return { ok: true, present: false, azureLive: null };
+    }
+    if (!("azureLive" in parsed)) {
+      return { ok: true, present: false, azureLive: null };
+    }
+    return { ok: true, present: true, azureLive: parsed.azureLive };
+  }
+
+  /**
+   * Build the list of missing-precondition tags for the stderr line.
+   * Each entry is one of:
+   *   - missing-input: <path>#<key>
+   *   - missing-env: <NAME>
+   *
+   * @param {boolean} inputPresent
+   * @returns {string[]}
+   */
+  function listMissingPreconditions(inputPresent) {
+    const missing = [];
+    if (!inputPresent) {
+      missing.push(`missing-input: ${AZURE_INPUT_PATH}#azureLive`);
+    }
+    for (const name of AZURE_REQUIRED_ENV) {
+      const v = process.env[name];
+      if (typeof v !== "string" || v.length === 0) {
+        missing.push(`missing-env: ${name}`);
+      }
+    }
+    return missing;
+  }
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath =
+    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+
+  /**
+   * Emit the deterministic INPUT_UNAVAILABLE branch. `missing` is the
+   * live-mode array of missing-precondition tags (each a string of the
+   * form `missing-input: <path>#<key>` or `missing-env: <NAME>`); when
+   * the caller has none to list (fixture-mode branch, or a malformed
+   * fixture), the canonical four-precondition line is emitted instead.
+   *
+   * @param {string[]} missing
+   */
+  function emitInputUnavailable(missing) {
+    console.log("LIVE GATE NOT MET: INPUT UNAVAILABLE");
+    if (Array.isArray(missing) && missing.length > 0) {
+      console.error(`missing=${missing.join("|")}`);
+    } else {
+      console.error(
+        `missing-input: ${AZURE_INPUT_PATH}#azureLive|missing-env: MYSQL_HOST|missing-env: MYSQL_PORT|missing-env: MYSQL_DATABASE|missing-env: MYSQL_USER`,
+      );
+    }
+    process.exitCode = 1;
+  }
+
+  /**
+   * Normalize the supplied env record into the shape the harness stub
+   * expects. Pure transformation; never reads `process.env`.
+   *
+   * @param {Record<string, string>} env
+   */
+  function envRecord(env) {
+    const out = {};
+    for (const name of AZURE_REQUIRED_ENV) {
+      out[name] = typeof env?.[name] === "string" ? env[name] : "";
+    }
+    return out;
+  }
+
+  // `verdict` is a single discriminated union consumed by the
+  // dispatcher at the bottom of the branch. Setting `verdict.handled`
+  // short-circuits the dispatcher so the malformed-fixture branch
+  // (which already emitted via `emitInputUnavailable`) is not
+  // double-emitted.
+  const verdict = { branch: null, handled: false, code: null, pass: false };
+
+  if (!fixturePath) {
+    // (a) Live mode — preflight the four env vars AND the input contract.
+    const input = await readAzureLiveInput();
+    const missing = listMissingPreconditions(input.present);
+    if (missing.length > 0) {
+      emitInputUnavailable(missing);
+      verdict.handled = true;
+    } else {
+      // Synthetic-future only: when all four preconditions are met the
+      // orchestrator hands off to the harness stub. Today this branch
+      // is unreachable; the harness stub is exercised via fixture mode.
+      const harness = await import("./azure-live-harness.mjs");
+      const result = await harness.runLiveGate({
+        env: envRecord(
+          Object.fromEntries(
+            AZURE_REQUIRED_ENV.map((n) => [n, process.env[n] ?? ""]),
+          ),
+        ),
+        azureLive: input.azureLive,
+      });
+      if (result && result.pass === true) {
+        verdict.branch = "PASS";
+      } else {
+        verdict.branch = "FAIL";
+        verdict.code =
+          result && typeof result.code === "string"
+            ? result.code
+            : "HARNESS_FAIL";
+      }
+    }
+  } else {
+    // (b) Fixture mode — pure deterministic. The fixture's branch tag
+    //     drives the verdict; no env or filesystem lookup beyond
+    //     reading the supplied fixture path occurs.
+    let fixture;
+    try {
+      const raw = await readFile(resolve(process.cwd(), fixturePath), "utf8");
+      fixture = JSON.parse(raw);
+    } catch {
+      emitInputUnavailable([]);
+      verdict.handled = true;
+    }
+
+    if (!verdict.handled) {
+      if (
+        !isPlainObject(fixture) ||
+        fixture.inputUnavailable === true ||
+        Object.keys(fixture).length === 0
+      ) {
+        // (b1) explicit INPUT_UNAVAILABLE fixture (including the `{}`
+        //      empty shape the plan body specifies): emit the
+        //      deterministic not-met branch verbatim.
+        emitInputUnavailable([]);
+        verdict.handled = true;
+      } else {
+        const harness = await import("./azure-live-harness.mjs");
+        const azureLiveObj = isPlainObject(fixture.azureLive)
+          ? fixture.azureLive
+          : {};
+        const simulate = isPlainObject(fixture.simulate)
+          ? fixture.simulate
+          : isPlainObject(azureLiveObj.simulate)
+            ? azureLiveObj.simulate
+            : {};
+        const result = await harness.runLiveGate({
+          env: envRecord({
+            MYSQL_HOST:
+              typeof fixture.host === "string" ? fixture.host : "",
+            MYSQL_PORT:
+              typeof fixture.port === "string" ? fixture.port : "",
+            MYSQL_DATABASE:
+              typeof fixture.database === "string" ? fixture.database : "",
+            MYSQL_USER:
+              typeof fixture.user === "string" ? fixture.user : "",
+          }),
+          azureLive: azureLiveObj,
+          simulate,
+        });
+
+        if (fixture.pass === true) {
+          // (b2) synthetic-future PASS fixture: drive the harness stub.
+          if (result && result.pass === true) {
+            verdict.branch = "PASS";
+          } else {
+            verdict.branch = "FAIL";
+            verdict.code =
+              result && typeof result.code === "string"
+                ? result.code
+                : "HARNESS_FAIL";
+          }
+        } else if (fixture.pass === false) {
+          // (b3) synthetic-future FAIL fixture: the harness stub
+          //      returns FAIL with the supplied code.
+          verdict.branch = "FAIL";
+          verdict.code =
+            result && typeof result.code === "string"
+              ? result.code
+              : "HARNESS_FAIL";
+        } else {
+          // Unknown fixture shape — treat as INPUT_UNAVAILABLE for safety.
+          emitInputUnavailable([]);
+          verdict.handled = true;
+        }
+      }
+    }
+  }
+
+  if (verdict.handled) {
+    // Already emitted.
+  } else if (verdict.branch === "PASS") {
+    console.log("LIVE GATE PASS");
+  } else if (verdict.branch === "FAIL") {
+    console.log(`LIVE GATE FAIL: ${verdict.code}`);
+    process.exitCode = 1;
+  } else {
+    // Should be unreachable: every branch above either sets
+    // handled=true, branch=PASS, or branch=FAIL. Defensive fallback
+    // mirrors the deterministic not-met branch.
+    emitInputUnavailable([]);
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

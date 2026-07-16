@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "blocked": true,
+  "blocking": [
+    "BASELINE_NOT_READY: BASELINE NOT READY: TEST_FAIL",
+    "HISTORY_NOT_CLEAN: FRESH PUBLIC ROOT REQUIRED",
+    "GOVERNANCE_NOT_DISTRIBUTABLE: GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY",
+    "OWNER_IDENTITY_NOT_READY: IDENTITY NOT READY: MISSING_OWNER_IDENTITY"
+  ],
+  "results": {
+    "1": "BASELINE NOT READY: TEST_FAIL",
+    "3": "FRESH PUBLIC ROOT REQUIRED",
+    "4": "GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY",
+    "12": "IDENTITY NOT READY: MISSING_OWNER_IDENTITY"
+  },
+  "notes": "Marker fixture that exercises Todo 16's PUBLIC SOURCE NOT READY exit-1 branch. Carries a `blocking` array shaped like .omo/evidence/task-14-blockers.json / task-15-blockers.json (with the four upstream tokens prepended) and a `results` map recording the upstream non-READY states. The validator emits PUBLIC SOURCE NOT READY exit 1; the blockers list materialises the four upstream tokens verbatim plus any additional non-READY entries derived from the `results` map."
+}

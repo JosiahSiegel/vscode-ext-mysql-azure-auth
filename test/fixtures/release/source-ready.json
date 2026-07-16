@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "clean": true,
+  "blocking": [],
+  "results": {
+    "1": "BASELINE READY",
+    "2": "CONTRACT READY",
+    "3": "HISTORY CLEAN",
+    "4": "GOVERNANCE DISTRIBUTABLE",
+    "5": "PRIVACY READY",
+    "6": "SURFACE READY",
+    "7": "MANIFEST READY",
+    "8": "CORE CLEANUP READY",
+    "9": "REFRESH RECOVERY READY",
+    "10": "LOGGING READY",
+    "11": "DOCUMENTATION READY",
+    "12": "IDENTITY READY",
+    "13": "SECURITY READY",
+    "14": "PACKAGE READY",
+    "15": "RELEASE READY"
+  },
+  "notes": "Synthetic-future clean fixture for Todo 16's PUBLIC SOURCE READY FOR OWNER ACTION exit-0 branch. This fixture does NOT fabricate real evidence; it supplies a `results` map that names every Todo 1..15 result as the matching exact READY string and an empty `blocking` array so the validator's clean branch passes. The fixture mirrors the shape that the live evidence ledger would carry if every upstream Todo re-ran clean against a fresh public root (the plan body accepts this as a synthetic-future outcome only)."
+}

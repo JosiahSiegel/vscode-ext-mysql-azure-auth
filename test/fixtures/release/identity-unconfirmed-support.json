@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "unconfirmed-support",
+  "description": "Fixture exercising the unconfirmed-support branch: supportCommitment.accepted is false, so the validator must reject it. The validator emits IDENTITY NOT READY: MISSING_OWNER_IDENTITY exit 1.",
+  "owner": {
+    "copyrightHolder": "Synthetic Owner For Validator Test Only",
+    "publisherId": "synthetic-owner-id",
+    "repositoryUrl": "https://github.com/synthetic-owner/mysql-azure-auth",
+    "securityContact": "mailto:security@synthetic-owner.example",
+    "supportCommitment": {
+      "accepted": false,
+      "acceptedAt": "2026-07-15T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

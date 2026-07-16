@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "valid",
+  "description": "Synthetic fully-populated owner identity that passes every field-level rule but intentionally conflicts with the current package.json repository URL (your-org/mysql-azure-auth). The validator must therefore emit IDENTITY NOT READY: REPOSITORY_MISMATCH exit 1. All values are synthetic placeholders for verification only; no real owner is asserted. The repositoryUrl below is deliberately not 'your-org/mysql-azure-auth' so the URL-mismatch branch fires.",
+  "owner": {
+    "copyrightHolder": "Synthetic Owner For Validator Test Only",
+    "publisherId": "synthetic-owner-id",
+    "repositoryUrl": "https://github.com/synthetic-owner/mysql-azure-auth",
+    "securityContact": "mailto:security@synthetic-owner.example",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-15T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

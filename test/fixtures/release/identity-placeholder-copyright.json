@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "placeholder-copyright",
+  "description": "Fixture exercising the placeholder-copyright branch: the copyrightHolder carries the literal 'placeholder' token so the validator must reject it. The validator emits IDENTITY NOT READY: MISSING_OWNER_IDENTITY exit 1 (the plan body treats any field-shape failure as MISSING_OWNER_IDENTITY).",
+  "owner": {
+    "copyrightHolder": "Your Name placeholder",
+    "publisherId": "synthetic-owner-id",
+    "repositoryUrl": "https://github.com/synthetic-owner/mysql-azure-auth",
+    "securityContact": "mailto:security@synthetic-owner.example",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-15T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

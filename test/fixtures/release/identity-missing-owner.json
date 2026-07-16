@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "missing-owner",
+  "description": "Fixture that mirrors the live absent-file branch: the owner object is explicitly null. The validator must therefore emit IDENTITY NOT READY: MISSING_OWNER_IDENTITY exit 1, confirming the absent-file branch.",
+  "owner": null
+}

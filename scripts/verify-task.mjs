@@ -2195,6 +2195,261 @@ if (!invokedDirectly) {
       console.log("DOCUMENTATION READY");
     }
   }
+} else if (task === "12") {
+  /* Todo 12 — owner-identity release gate.
+   *
+   * The validator reads `.omo/inputs/project-direction-open-source.json`
+   * if present (returns IDENTITY NOT READY: MISSING_OWNER_IDENTITY exit 1
+   * if absent), validates each owner field against the rules in the
+   * plan body, compares repositoryUrl to the normalized
+   * package.json.repository.url, and emits exactly one of:
+   *   - "IDENTITY READY" exit 0 (all fields valid AND repositoryUrl
+   *     matches package.json.repository.url AND supportCommitment
+   *     accepted === true).
+   *   - "IDENTITY NOT READY: MISSING_OWNER_IDENTITY" exit 1 (file
+   *     absent or any field fails shape/validation).
+   *   - "IDENTITY NOT READY: REPOSITORY_MISMATCH" exit 1 (owner
+   *     present but URL does not match package.json.repository.url).
+   *
+   * The --fixture flag swaps the live input path for a deterministic
+   * fixture so the matrix can be exercised without ever touching
+   * `.omo/inputs/project-direction-open-source.json`. The live absent-
+   * file check (gate 6) runs without --fixture.
+   */
+  const IDENTITY_INPUT_PATH = ".omo/inputs/project-direction-open-source.json";
+  const PACKAGE_JSON_PATH = "package.json";
+  const IDENTITY_FIXTURE_CASES = new Set([
+    "valid",
+    "missing-owner",
+    "placeholder-copyright",
+    "malformed-publisher-id",
+    "unconfirmed-support",
+  ]);
+  const IDENTITY_PLACEHOLDER_TOKENS = [
+    "TODO",
+    "your-",
+    "placeholder",
+    "TBD",
+    "FIXME",
+    "<placeholder>",
+  ];
+
+  function hasIdentityPlaceholderToken(value) {
+    if (typeof value !== "string") return false;
+    const lower = value.toLowerCase();
+    return IDENTITY_PLACEHOLDER_TOKENS.some((token) =>
+      lower.includes(token.toLowerCase())
+    );
+  }
+
+  /**
+   * Validate the owner identity block. Returns:
+   *   - { ok: true, owner: <normalized owner> } when every field
+   *     passes the plan body's rules.
+   *   - { ok: false, code: "MISSING_OWNER_IDENTITY" } when the
+   *     identity is absent, malformed, or carries a placeholder.
+   *
+   * Repository-vs-package.json comparison is deliberately NOT done
+   * here so the validator can emit REPOSITORY_MISMATCH separately
+   * (per the task body: "treat this as a still-NOT-READY since the
+   * contract is broken, but report the specific code so the operator
+   * knows what to fix").
+   *
+   * @param {unknown} ownerInputRaw parsed owner input file (may be null)
+   */
+  function validateIdentityOwner(ownerInputRaw) {
+    if (!isPlainObject(ownerInputRaw)) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    const owner = ownerInputRaw.owner;
+    if (!isPlainObject(owner)) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+
+    // (a) copyrightHolder: trimmed 2-100 char string, no <, >, newline,
+    //     "your-", "TODO", "placeholder".
+    const rawHolder =
+      typeof owner.copyrightHolder === "string" ? owner.copyrightHolder : "";
+    const copyrightHolder = rawHolder.trim();
+    if (copyrightHolder.length < 2 || copyrightHolder.length > 100) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    if (
+      /[<>]/.test(copyrightHolder) ||
+      /[\r\n]/.test(copyrightHolder) ||
+      /your-/i.test(copyrightHolder) ||
+      /TODO/.test(copyrightHolder) ||
+      /placeholder/i.test(copyrightHolder)
+    ) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    if (hasIdentityPlaceholderToken(copyrightHolder)) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+
+    // (b) publisherId: ^[a-z0-9][a-z0-9-]{2,49}$.
+    const publisherId = typeof owner.publisherId === "string" ? owner.publisherId : "";
+    if (!/^[a-z0-9][a-z0-9-]{2,49}$/.test(publisherId)) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+
+    // (c) repositoryUrl: canonical https://github.com/<owner>/<repo>
+    //     with no query/fragment.
+    const rawRepoUrl =
+      typeof owner.repositoryUrl === "string" ? owner.repositoryUrl : "";
+    const repositoryUrl = normalizeGitHubRepoUrl(rawRepoUrl);
+    if (
+      !/^https:\/\/github\.com\/[a-zA-Z0-9._-]+\/[a-zA-Z0-9._-]+$/.test(
+        repositoryUrl
+      )
+    ) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+
+    // (d) securityContact: mailto:<valid-address> OR https:// URL,
+    //     no placeholder token, used verbatim in SECURITY.md.
+    const rawContact =
+      typeof owner.securityContact === "string" ? owner.securityContact.trim() : "";
+    if (rawContact.length === 0) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    const mailtoMatch = /^mailto:([^\s<>"']+)@([^\s<>"']+)$/.exec(rawContact);
+    const httpsMatch = /^https:\/\/[^\s<>"']+$/.exec(rawContact);
+    if (!mailtoMatch && !httpsMatch) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    if (hasIdentityPlaceholderToken(rawContact)) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    const securityContact = rawContact;
+
+    // (e) supportCommitment.accepted === true with valid ISO-8601
+    //     acceptedAt, integer securityAckDays (1..7), and integer
+    //     criticalFixTargetDays (1..30).
+    const support = owner.supportCommitment;
+    if (!isPlainObject(support) || support.accepted !== true) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    const acceptedAt =
+      typeof support.acceptedAt === "string" ? support.acceptedAt : "";
+    const iso8601 =
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    if (!iso8601.test(acceptedAt) || Number.isNaN(Date.parse(acceptedAt))) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    if (
+      typeof support.securityAckDays !== "number" ||
+      !Number.isInteger(support.securityAckDays) ||
+      support.securityAckDays < 1 ||
+      support.securityAckDays > 7
+    ) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+    if (
+      typeof support.criticalFixTargetDays !== "number" ||
+      !Number.isInteger(support.criticalFixTargetDays) ||
+      support.criticalFixTargetDays < 1 ||
+      support.criticalFixTargetDays > 30
+    ) {
+      return { ok: false, code: "MISSING_OWNER_IDENTITY" };
+    }
+
+    return {
+      ok: true,
+      owner: {
+        copyrightHolder,
+        publisherId,
+        repositoryUrl,
+        securityContact,
+        support: {
+          accepted: true,
+          acceptedAt,
+          securityAckDays: support.securityAckDays,
+          criticalFixTargetDays: support.criticalFixTargetDays,
+        },
+      },
+    };
+  }
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath =
+    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const liveMode = process.argv.includes("--live");
+
+  let identityOwnerInput = null;
+  let usedFixturePath = null;
+
+  if (!liveMode) {
+    // --fixture <path> mode: read the owner input block from the
+    // fixture file. The fixture is expected to be a JSON object whose
+    // shape mirrors the live .omo/inputs/project-direction-open-source.json
+    // (i.e. { owner: {...} }), OR the negative shapes documented in
+    // the task body (e.g. {"owner": null}).
+    if (!fixturePath) {
+      console.error("IDENTITY NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    } else {
+      try {
+        identityOwnerInput = JSON.parse(
+          await readFile(resolve(process.cwd(), fixturePath), "utf8")
+        );
+        usedFixturePath = fixturePath;
+      } catch {
+        console.error("IDENTITY NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      }
+    }
+  } else {
+    // Live mode: read .omo/inputs/project-direction-open-source.json
+    // if present; treat an absent file as the MISSING_OWNER_IDENTITY
+    // branch (the honest plan-accepted state for today).
+    const livePath = IDENTITY_INPUT_PATH;
+    try {
+      const body = await readFile(resolve(process.cwd(), livePath), "utf8");
+      identityOwnerInput = JSON.parse(body);
+    } catch {
+      identityOwnerInput = null;
+    }
+  }
+
+  if (identityOwnerInput !== null || usedFixturePath !== null) {
+    // Validate the identity first. This produces MISSING_OWNER_IDENTITY
+    // for either (a) absent owner object, (b) any field failing the
+    // plan-body rules.
+    const validation = validateIdentityOwner(identityOwnerInput);
+    if (!validation.ok) {
+      console.log(`IDENTITY NOT READY: ${validation.code}`);
+      process.exitCode = 1;
+    } else {
+      // Owner identity itself is valid; now compare repositoryUrl to
+      // the live package.json repository URL. Mismatch → REPOSITORY_MISMATCH
+      // (still NOT-READY per the task body).
+      let manifestRepoUrl = "";
+      try {
+        const manifest = await loadJson(PACKAGE_JSON_PATH);
+        manifestRepoUrl = normalizeGitHubRepoUrl(
+          (manifest && manifest.repository && manifest.repository.url) || ""
+        );
+      } catch {
+        console.log("IDENTITY NOT READY: MANIFEST_MISSING");
+        process.exitCode = 1;
+      }
+      if (!process.exitCode && manifestRepoUrl !== validation.owner.repositoryUrl) {
+        console.log("IDENTITY NOT READY: REPOSITORY_MISMATCH");
+        process.exitCode = 1;
+      }
+      if (!process.exitCode) {
+        console.log("IDENTITY READY");
+      }
+    }
+  } else {
+    // Live mode + file absent: the honest plan-accepted branch for
+    // today. `.omo/inputs/project-direction-open-source.json` does not
+    // exist on disk, so the validator cannot fabricate identity values
+    // and must emit MISSING_OWNER_IDENTITY with exit 1.
+    console.log("IDENTITY NOT READY: MISSING_OWNER_IDENTITY");
+    process.exitCode = 1;
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

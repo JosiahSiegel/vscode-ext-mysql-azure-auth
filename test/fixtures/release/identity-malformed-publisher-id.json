@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "case": "malformed-publisher-id",
+  "description": "Fixture exercising the malformed-publisher-id branch: the publisherId starts with an uppercase letter so it fails the ^[a-z0-9][a-z0-9-]{2,49}$ regex. The validator emits IDENTITY NOT READY: MISSING_OWNER_IDENTITY exit 1.",
+  "owner": {
+    "copyrightHolder": "Synthetic Owner For Validator Test Only",
+    "publisherId": "Bad_Publisher_Id_Starts_Upper",
+    "repositoryUrl": "https://github.com/synthetic-owner/mysql-azure-auth",
+    "securityContact": "mailto:security@synthetic-owner.example",
+    "supportCommitment": {
+      "accepted": true,
+      "acceptedAt": "2026-07-15T00:00:00.000Z",
+      "securityAckDays": 7,
+      "criticalFixTargetDays": 30
+    }
+  }
+}

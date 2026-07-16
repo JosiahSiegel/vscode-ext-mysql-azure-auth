@@ -14,12 +14,7 @@ are not covered.
 Please report security issues privately. **Do not** open a public GitHub issue
 or pull request for a suspected vulnerability.
 
-Owner contact not yet configured; see
-`.omo/inputs/project-direction-open-source.json#owner.securityContact`.
-
-> When the owner input file is populated and validated, this section will carry
-> the exact `mailto:` address or `https://` URL configured there. Until then,
-> this preview cannot be marked `GOVERNANCE DISTRIBUTABLE`.
+Report security issues to: mailto:josiah0601@gmail.com
 
 ## Acknowledgement and Remediation Targets
 

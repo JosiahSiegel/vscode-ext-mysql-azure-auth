@@ -520,7 +520,7 @@ function validateOwnerInput(owner) {
   }
 
   const publisherId = typeof owner.publisherId === "string" ? owner.publisherId : "";
-  if (!/^[a-z0-9][a-z0-9-]{2,49}$/.test(publisherId)) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{2,49}$/.test(publisherId)) {
     return { ok: false, code: "MISSING OWNER IDENTITY" };
   }
 
@@ -2547,9 +2547,11 @@ if (!invokedDirectly) {
       return { ok: false, code: "MISSING_OWNER_IDENTITY" };
     }
 
-    // (b) publisherId: ^[a-z0-9][a-z0-9-]{2,49}$.
+    // (b) publisherId: ^[a-zA-Z0-9][a-zA-Z0-9-]{2,49}$ (case-insensitive
+    //     because real VS Marketplace publisher ids allow mixed case; the
+    //     validator was previously too strict).
     const publisherId = typeof owner.publisherId === "string" ? owner.publisherId : "";
-    if (!/^[a-z0-9][a-z0-9-]{2,49}$/.test(publisherId)) {
+    if (!/^[a-zA-Z0-9][a-zA-Z0-9-]{2,49}$/.test(publisherId)) {
       return { ok: false, code: "MISSING_OWNER_IDENTITY" };
     }
 
@@ -2857,7 +2859,7 @@ if (!invokedDirectly) {
     //   - <PREFIX> PUBLIC ROOT REQUIRED  (Todo 3 multi-word form)
     const rest = s.slice(prefix.length).trim();
     const acceptedRestPattern =
-      /^(READY|NOT\s+READY(?::\s*.*)?|NOT\s+DISTRIBUTABLE(?::\s*.*)?|SCAN\s+INCOMPLETE|CLEAN|REQUIRED|PUBLIC\s+ROOT\s+REQUIRED)\s*$/i;
+      /^(READY|NOT\s+READY(?::\s*.*)?|NOT\s+DISTRIBUTABLE(?::\s*.*)?|DISTRIBUTABLE|SCAN\s+INCOMPLETE|CLEAN|REQUIRED|PUBLIC\s+ROOT\s+REQUIRED)\s*$/i;
     if (!acceptedRestPattern.test(rest)) {
       return null;
     }
@@ -4798,7 +4800,9 @@ if (!invokedDirectly) {
     "18": "PILOT GATE PASS",
   });
 
-  const T19_PUBLISHER_ID_REGEX = /^[a-z0-9][a-z0-9-]{2,49}$/;
+  // Case-insensitive: real VS Marketplace publisher ids allow mixed case
+  // (e.g. "JosiahSiegel"). The validator was previously too strict.
+  const T19_PUBLISHER_ID_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9-]{2,49}$/;
   const T19_LOWER_HEX_64_REGEX = /^[0-9a-f]{64}$/;
   const T19_SHA256_HEX_REGEX = /^[0-9a-f]{64}$/;
   const T19_ISO_8601_UTC_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;

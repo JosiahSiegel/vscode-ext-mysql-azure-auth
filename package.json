@@ -4,11 +4,11 @@
   "description": "A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.",
   "version": "0.1.0",
   "packageManager": "npm@10.8.1",
-  "publisher": "your-publisher",
+  "publisher": "JosiahSiegel",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/your-org/mysql-azure-auth"
+    "url": "https://github.com/JosiahSiegel/vscode-ext-mysql-azure-auth"
   },
   "engines": {
     "vscode": "^1.85.0"

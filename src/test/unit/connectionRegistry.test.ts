@@ -21,7 +21,6 @@ import * as assert from 'assert';
 import { __test__ } from '../mocks/vscode';
 import { EntraTokenProvider } from '../../identity/entraToken';
 import { ActorRegistry, REFRESH_RETRY_DELAY_MS } from '../../registry/actorRegistry';
-import type { ConnectionConfig } from '../../domain';
 import type { PoolFactory, DatabaseSessionConfig, PoolLike } from '../../registry/databaseSession';
 import { makeConnectionConfig } from '../factories/connectionConfig';
 

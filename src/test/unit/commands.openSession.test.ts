@@ -21,7 +21,6 @@ import { ActorRegistry } from '../../registry/actorRegistry';
 import {
     EntraTokenProvider,
 } from '../../identity/entraToken';
-import type { ConnectionConfig } from '../../domain';
 import type { DatabaseSessionConfig, PoolFactory, PoolLike } from '../../registry/databaseSession';
 import { makeConnectionConfig } from '../factories/connectionConfig';
 import * as fs from 'fs';

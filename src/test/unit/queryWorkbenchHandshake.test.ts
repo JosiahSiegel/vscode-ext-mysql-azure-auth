@@ -85,7 +85,7 @@ function createCapturingPanel() {
 function buildFakePool(rows: unknown[] = [], fields: { name: string }[] = []) {
     const fakeEnd = sinon.stub().resolves();
     const fakeExecute = sinon.stub().resolves([rows, fields]);
-    const factory: PoolFactory = (config: DatabaseSessionConfig): PoolLike => ({
+    const factory: PoolFactory = (_config: DatabaseSessionConfig): PoolLike => ({
         execute: fakeExecute as unknown as PoolLike['execute'],
         end: fakeEnd as unknown as () => Promise<void>,
     });

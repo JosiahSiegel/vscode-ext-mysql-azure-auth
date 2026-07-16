@@ -31,14 +31,6 @@ function fakeTokenCredential(token: string, expiresInMs = 60 * 60_000): TokenCre
     };
 }
 
-function cancelledVSCodeCredential(): TokenCredential {
-    return {
-        async getToken() {
-            throw new Error('User cancelled');
-        },
-    };
-}
-
 function unavailableVSCodeCredential(): TokenCredential {
     return {
         async getToken() {

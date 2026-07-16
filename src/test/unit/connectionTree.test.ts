@@ -15,7 +15,6 @@ import {
     ServerTree,
     ServerNode,
     TableNode,
-    TreeErrorNode,
 } from '../../views/connectionExplorer';
 import { ActorRegistry } from '../../registry/actorRegistry';
 import { GlobalStateConnectionCatalog } from '../../registry/connectionCatalog';
@@ -38,10 +37,10 @@ function fakeIdentity(): { readonly getAccessToken: () => Promise<string> } {
 function buildFakePool(rows: unknown[] = [], fields: { name: string }[] = []) {
     const fakeEnd = sinon.stub().resolves();
     const fakeExecute = sinon.stub().resolves([rows, fields]);
-    const factory: PoolFactory = (config: DatabaseSessionConfig): PoolLike => ({
+    const factory: PoolFactory = (_config: DatabaseSessionConfig): PoolLike => ({
         execute: fakeExecute as unknown as PoolLike['execute'],
         end: fakeEnd as unknown as () => Promise<void>,
-        // config retained for assertions if a test wants it
+        // _config retained for assertions if a test wants it
     });
     return { factory, fakeExecute, fakeEnd };
 }

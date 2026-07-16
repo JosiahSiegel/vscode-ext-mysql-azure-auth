@@ -434,7 +434,7 @@ export class Uri {
     }
 }
 
-export interface Extension<_T = unknown> {
+export interface Extension {
     readonly id: string;
 }
 

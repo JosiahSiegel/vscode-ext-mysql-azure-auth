@@ -199,6 +199,7 @@
     "verify:t11": "node scripts/verify-task.mjs 11",
     "verify:t12": "node scripts/verify-task.mjs 12",
     "verify:t13": "node scripts/verify-task.mjs 13",
+    "verify:t14": "node scripts/verify-task.mjs 14",
     "security:audit": "node scripts/security-audit.mjs",
     "security:secrets": "node scripts/run-gitleaks.mjs",
     "security:sbom": "node scripts/sbom.mjs",

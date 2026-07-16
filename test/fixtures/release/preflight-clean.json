@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "case": "all-ready",
+  "description": "Happy-path preflight. All 13 upstream Todo machine results are READY; the validator emits PACKAGE PREFLIGHT READY exit 0 without running the synthetic-archive scan. This fixture is the test-only path for the upstream check; the live mode reads on-disk evidence.",
+  "expectedResults": {
+    "1": "BASELINE READY",
+    "2": "CONTRACT READY",
+    "3": "HISTORY CLEAN",
+    "4": "GOVERNANCE DISTRIBUTABLE",
+    "5": "PRIVACY READY",
+    "6": "SURFACE READY",
+    "7": "MANIFEST READY",
+    "8": "CORE CLEANUP READY",
+    "9": "REFRESH RECOVERY READY",
+    "10": "LOGGING READY",
+    "11": "DOCUMENTATION READY",
+    "12": "IDENTITY READY",
+    "13": "SECURITY READY"
+  },
+  "blockers": [],
+  "packageValidatorFixturePath": null,
+  "expectedResult": "PACKAGE PREFLIGHT READY",
+  "expectedExitCode": 0
+}

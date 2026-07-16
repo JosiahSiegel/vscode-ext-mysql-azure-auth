@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "case": "archive-contaminated",
+  "description": "All 13 upstream Todo results are READY but the synthetic archive fixture contains a forbidden .log entry, so the package-validator scan emits ARCHIVE_CONTAMINATED. The validator must surface PACKAGE NOT BUILT: ARCHIVE_CONTAMINATED exit 1. The upstream check still passes (blockers array is empty), so the failure is purely the archive-contamination branch.",
+  "expectedResults": {
+    "1": "BASELINE READY",
+    "2": "CONTRACT READY",
+    "3": "HISTORY CLEAN",
+    "4": "GOVERNANCE DISTRIBUTABLE",
+    "5": "PRIVACY READY",
+    "6": "SURFACE READY",
+    "7": "MANIFEST READY",
+    "8": "CORE CLEANUP READY",
+    "9": "REFRESH RECOVERY READY",
+    "10": "LOGGING READY",
+    "11": "DOCUMENTATION READY",
+    "12": "IDENTITY READY",
+    "13": "SECURITY READY"
+  },
+  "blockers": [],
+  "packageValidatorFixturePath": "test/fixtures/release/package-validator-fixture-contaminated.json",
+  "expectedResult": "PACKAGE NOT BUILT: ARCHIVE_CONTAMINATED",
+  "expectedExitCode": 1
+}

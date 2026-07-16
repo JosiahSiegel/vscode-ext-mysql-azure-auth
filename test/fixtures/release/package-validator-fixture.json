@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "case": "clean-synthetic-archive",
+  "description": "Synthetic ZIP-like file table for the package-validator scanner. Every entry name is allowlisted, the canonical extension/package.json entry is present, and the byte layout is deterministic (lexicographic entry order, no timestamps, no randomness). The validator builds the archive twice and asserts the SHA-256 is stable. No real VSIX is built or read.",
+  "entries": [
+    {
+      "name": "extension/package.json",
+      "content": "{\"name\":\"synthetic-vscode-extension\",\"version\":\"0.0.0-test\",\"engines\":{\"vscode\":\"^1.85.0\"}}"
+    },
+    {
+      "name": "extension/CHANGELOG.md",
+      "content": "# Synthetic Changelog\n\nNo real release; this is a deterministic archive fixture.\n"
+    },
+    {
+      "name": "extension/README.md",
+      "content": "# Synthetic README\n\nThis fixture exercises the package-validator's allowlist/denylist logic.\n"
+    },
+    {
+      "name": "extension/out/extension.js",
+      "content": "/* synthetic bundle; not a real extension */\nmodule.exports = { activate() {} };\n"
+    }
+  ],
+  "expectedResult": "PACKAGE_VALIDATOR: READY",
+  "expectedExitCode": 0
+}

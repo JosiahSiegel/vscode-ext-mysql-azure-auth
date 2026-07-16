@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "case": "contaminated-synthetic-archive",
+  "description": "Synthetic ZIP-like file table for the contamination branch. The .log entry in the archive trips the denylist gate so the package-validator emits ARCHIVE_CONTAMINATED. The upstream Todo results are all READY in preflight-package-contaminated.json, so this is the only failure surface for that preflight scenario.",
+  "entries": [
+    {
+      "name": "extension/package.json",
+      "content": "{\"name\":\"synthetic-vscode-extension\",\"version\":\"0.0.0-test\",\"engines\":{\"vscode\":\"^1.85.0\"}}"
+    },
+    {
+      "name": "extension/out/extension.js",
+      "content": "/* synthetic bundle; not a real extension */\nmodule.exports = { activate() {} };\n"
+    },
+    {
+      "name": "extension/release.log",
+      "content": "2026-07-15T12:00:00Z build step succeeded (synthetic)\n"
+    }
+  ],
+  "expectedResult": "PACKAGE_VALIDATOR: ARCHIVE_CONTAMINATED",
+  "expectedExitCode": 1
+}

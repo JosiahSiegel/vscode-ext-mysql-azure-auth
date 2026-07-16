@@ -2710,6 +2710,445 @@ if (!invokedDirectly) {
     console.log("IDENTITY NOT READY: MISSING_OWNER_IDENTITY");
     process.exitCode = 1;
   }
+} else if (task === "14") {
+  /* Todo 14 — package preflight gate.
+   *
+   * The validator reads the machine result string for each prior Todo
+   * (1..13) and compares it against the canonical READY result the
+   * plan body lists. Any non-READY result forces
+   * `PACKAGE NOT BUILT: UPSTREAM_BLOCKER` exit 1 and writes a JSON
+   * `blockers` array to `.omo/evidence/task-14-blockers.json` so
+   * downstream Todos 15–19 can consume it without re-running the
+   * upstream checks.
+   *
+   * Two execution modes are supported:
+   *
+   *   (a) Live mode (no --fixture):
+   *       The validator scans `.omo/evidence/task-N-project-direction-open-source.{txt,md}`
+   *       for the first non-comment line that looks like a machine
+   *       result. The "first non-comment line" parser skips markdown
+   *       headings, blank lines, list markers, and surrounding
+   *       backticks before matching against the canonical prefix
+   *       list. This is the only path that touches on-disk evidence.
+   *
+   *   (b) Fixture mode (--fixture <path>):
+   *       The fixture carries an `expectedResults` map keyed by Todo
+   *       number (e.g. `{ "1": "BASELINE NOT READY: TEST_FAIL", ... }`).
+   *       The validator uses that map INSTEAD of reading on-disk
+   *       evidence, so each preflight fixture can declare its own
+   *       upstream state. The optional `packageValidatorFixturePath`
+   *       field points at a synthetic-archive fixture for the
+   *       archive-contamination branch. When present and all upstream
+   *       results are READY, the validator runs
+   *       `node scripts/package-validator.mjs <path>` and surfaces
+   *       the validator's `PACKAGE_VALIDATOR: <code>` result.
+   *
+   * Top-level codes:
+   *   - PACKAGE PREFLIGHT READY                     (exit 0)
+   *   - PACKAGE NOT BUILT: UPSTREAM_BLOCKER         (exit 1) any non-READY upstream
+   *   - PACKAGE NOT BUILT: ARCHIVE_CONTAMINATED     (exit 1) synthetic archive rejected
+   *   - PACKAGE NOT BUILT: ARCHIVE_INVALID          (exit 1) synthetic archive bytes broken
+   *   - PACKAGE NOT BUILT: ARCHIVE_NON_DETERMINISTIC (exit 1) synthetic archive not stable
+   *   - PACKAGE NOT BUILT: PACKAGE_VALIDATOR_UNAVAILABLE (exit 1) zlib / validator broken
+   *   - PACKAGE NOT BUILT: FIXTURE_INVALID          (exit 1) malformed fixture
+   */
+  const REQUIRED_READY = {
+    "1": "BASELINE READY",
+    "2": "CONTRACT READY",
+    "3": "HISTORY CLEAN",
+    "4": "GOVERNANCE DISTRIBUTABLE",
+    "5": "PRIVACY READY",
+    "6": "SURFACE READY",
+    "7": "MANIFEST READY",
+    "8": "CORE CLEANUP READY",
+    "9": "REFRESH RECOVERY READY",
+    "10": "LOGGING READY",
+    "11": "DOCUMENTATION READY",
+    "12": "IDENTITY READY",
+    "13": "SECURITY READY",
+  };
+  // Recognised machine-result prefixes used by the line scanner.
+  // Each entry is the canonical key (Todo N) -> array of acceptable
+  // first-word prefixes for the scanned line. The parser picks the
+  // longest match that still parses as `<PREFIX> [READY|NOT READY|...]: <code?>`.
+  const RESULT_PREFIXES = [
+    "BASELINE",
+    "CONTRACT",
+    "HISTORY",
+    "FRESH",
+    "GOVERNANCE",
+    "PRIVACY",
+    "SURFACE",
+    "MANIFEST",
+    "CORE CLEANUP",
+    "REFRESH RECOVERY",
+    "LOGGING",
+    "DOCUMENTATION",
+    "IDENTITY",
+    "SECURITY",
+  ];
+  const EVIDENCE_DIR = ".omo/evidence";
+  const BLOCKERS_PATH = resolve(process.cwd(), EVIDENCE_DIR, "task-14-blockers.json");
+  const EVIDENCE_PATH = resolve(process.cwd(), EVIDENCE_DIR, "task-14-project-direction-open-source.json");
+
+  /**
+   * Strip surrounding markdown backticks / bold markers / list markers
+   * and any trailing parenthetical ("(exit code 1)", "(against ...)",
+   * "(the plan-accepted honest branch...)") from a raw evidence line.
+   * Returns the cleaned candidate or null if the line carries no
+   * recognisable result.
+   *
+   * @param {string} raw
+   * @returns {string | null}
+   */
+  function extractMachineResult(raw) {
+    if (typeof raw !== "string") return null;
+    let s = raw.trim();
+    if (s.length === 0) return null;
+    // Strip a leading markdown list marker ("- ", "* ", "1. ").
+    s = s.replace(/^([-*]\s+|\d+\.\s+)/, "");
+    // Strip surrounding **bold** markers (markdown emphasis).
+    s = s.replace(/^\*\*|\*\*$/g, "").trim();
+    // Strip a "Machine result" prefix (case-insensitive). The prefix
+    // may end with ":" or be a bare section header. We strip the whole
+    // label (including any "string" or "machine result" prose) up to
+    // the first non-separator character.
+    s = s.replace(/^(?:#+\s*)?machine\s+result(?:\s*\([^)]*\))?(?:\s+string)?[\s:\-]*/i, "").trim();
+    if (s.length === 0) return null;
+    // Extract the contents of a backticked span if present. We pick
+    // the FIRST backticked span (markdown inline code) and use it as
+    // the result; remaining prose after the backtick is dropped.
+    const tickMatch = s.match(/`([^`]+)`/);
+    if (tickMatch) {
+      s = tickMatch[1].trim();
+    } else {
+      // No backticks: strip any leading surrounding backticks (the
+      // whole line might be wrapped).
+      if (s.startsWith("`") && s.endsWith("`") && s.length >= 2) {
+        s = s.slice(1, -1).trim();
+      }
+    }
+    if (s.length === 0) return null;
+    // Strip trailing parenthetical(s). Be greedy-but-bounded: peel any
+    // "(...)" suffix off the right edge until no parenthetical
+    // remains. This handles "(exit code 1)", "(against ...)", and
+    // "(the plan-accepted honest branch...)".
+    while (/\s*\([^)]*\)\s*$/.test(s)) {
+      s = s.replace(/\s*\([^)]*\)\s*$/, "").trim();
+    }
+    // Strip a trailing period.
+    s = s.replace(/\.\s*$/, "").trim();
+    if (s.length === 0) return null;
+    // Must start with one of the recognised prefixes. This guards
+    // against prose lines like "Baseline head: d8765f5 ..." which
+    // happen to start with "BASELINE" but carry a colon-and-value
+    // that is not a result.
+    const prefix = RESULT_PREFIXES.find((p) => s === p || s.startsWith(p + " "));
+    if (!prefix) return null;
+    // Disqualify the "BASELINE HEAD" / "COMMIT PRODUCED" style
+    // prose headers: they start with the prefix but do not name a
+    // canonical machine result. The accepted result forms are
+    //   - <PREFIX> READY
+    //   - <PREFIX> NOT READY[: <code>]
+    //   - <PREFIX> NOT DISTRIBUTABLE[: <code>]
+    //   - <PREFIX> CLEAN
+    //   - <PREFIX> SCAN INCOMPLETE
+    //   - <PREFIX> REQUIRED        (Todo 3: FRESH PUBLIC ROOT REQUIRED)
+    //   - <PREFIX> PUBLIC ROOT REQUIRED  (Todo 3 multi-word form)
+    const rest = s.slice(prefix.length).trim();
+    const acceptedRestPattern =
+      /^(READY|NOT\s+READY(?::\s*.*)?|NOT\s+DISTRIBUTABLE(?::\s*.*)?|SCAN\s+INCOMPLETE|CLEAN|REQUIRED|PUBLIC\s+ROOT\s+REQUIRED)\s*$/i;
+    if (!acceptedRestPattern.test(rest)) {
+      return null;
+    }
+    return s;
+  }
+
+  /**
+   * Walk the evidence file and return the first machine-result line.
+   * The parser looks for a "Machine result" marker (case-insensitive)
+   * and extracts the result from that section. If no marker is found,
+   * it falls back to the first non-blank, non-heading, non-comment
+   * line that carries a valid result. Multi-line backticked spans
+   * (e.g. `` `REFRESH RECOVERY READY` (against\n`fixture.json`).\n``)
+   * are joined so the result extractor can read across the line
+   * boundary.
+   *
+   * @param {string} body file contents
+   * @returns {string | null}
+   */
+  function firstMachineResult(body) {
+    if (typeof body !== "string") return null;
+    const lines = body.split(/\r?\n/);
+    // Locate the first "Machine result" marker (case-insensitive).
+    let markerIdx = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      if (/machine\s+result/i.test(lines[i])) {
+        markerIdx = i;
+        break;
+      }
+    }
+    if (markerIdx === -1) {
+      // No marker: take the first non-blank, non-heading, non-comment
+      // line. This handles Task 1 which states the result on the
+      // first line of the file.
+      for (let i = 0; i < lines.length; i += 1) {
+        const trimmed = lines[i].trim();
+        if (trimmed.length === 0) continue;
+        if (trimmed.startsWith("#")) continue;
+        if (trimmed.startsWith("//")) continue;
+        if (trimmed.startsWith("/*")) continue;
+        const candidate = extractMachineResult(trimmed);
+        if (candidate) return candidate;
+      }
+      return null;
+    }
+    // Marker found. The result is either on the same line (after the
+    // marker prefix) or on the next non-blank line(s). We collect
+    // lines starting at markerIdx, until we either (a) find a valid
+    // result or (b) hit a blank-then-non-blank boundary (i.e. the
+    // header is a section heading and the result follows).
+    // Build a candidate by joining consecutive non-blank lines into a
+    // single buffer (handles multi-line backticked spans).
+    let buffer = lines[markerIdx];
+    let candidate = extractMachineResult(buffer);
+    if (candidate) return candidate;
+    // Try the next non-blank line(s).
+    let i = markerIdx + 1;
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (trimmed.length === 0) {
+        // Stop at first blank line AFTER the marker: a header followed
+        // by a blank has a clear result line below.
+        i += 1;
+        break;
+      }
+      buffer = `${buffer}\n${lines[i]}`;
+      candidate = extractMachineResult(buffer);
+      if (candidate) return candidate;
+      // Allow up to 4 lines to be joined before bailing out.
+      if (i - markerIdx > 4) break;
+      i += 1;
+    }
+    // After the blank, try the next single line too (covers the
+    // header+blank+result pattern for Tasks 4–9).
+    while (i < lines.length) {
+      const trimmed = lines[i].trim();
+      if (trimmed.length === 0) {
+        i += 1;
+        continue;
+      }
+      candidate = extractMachineResult(trimmed);
+      if (candidate) return candidate;
+      // Only one attempt past the blank.
+      break;
+    }
+    return null;
+  }
+
+  /**
+   * Read a single Todo N's evidence file (txt or md) and return the
+   * machine-result string. Returns null when the file is missing or
+   * carries no recognisable result.
+   *
+   * @param {string} n task number ("1".."13")
+   */
+  async function readUpstreamResult(n) {
+    const candidates = [
+      resolve(process.cwd(), EVIDENCE_DIR, `task-${n}-project-direction-open-source.txt`),
+      resolve(process.cwd(), EVIDENCE_DIR, `task-${n}-project-direction-open-source.md`),
+    ];
+    for (const path of candidates) {
+      try {
+        const body = await readFile(path, "utf8");
+        const result = firstMachineResult(body);
+        if (result) return { result, path };
+      } catch {
+        // try next extension
+      }
+    }
+    return null;
+  }
+
+  async function writeBlockers(blockers) {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(resolve(process.cwd(), EVIDENCE_DIR), { recursive: true });
+    await writeFile(BLOCKERS_PATH, JSON.stringify(blockers, null, 2) + "\n", "utf8");
+  }
+
+  async function writeEvidence(evidence) {
+    const { mkdir, writeFile } = await import("node:fs/promises");
+    await mkdir(resolve(process.cwd(), EVIDENCE_DIR), { recursive: true });
+    await writeFile(EVIDENCE_PATH, JSON.stringify(evidence, null, 2) + "\n", "utf8");
+  }
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const fixtureMode = typeof fixturePath === "string" && fixturePath.length > 0 && fixturePath !== "--";
+
+  let upstream = {};
+  let usedFixturePath = null;
+  let fixtureObj = null;
+
+  if (fixtureMode) {
+    try {
+      const body = await readFile(resolve(process.cwd(), fixturePath), "utf8");
+      fixtureObj = JSON.parse(body);
+      usedFixturePath = fixturePath;
+    } catch {
+      console.error("PACKAGE NOT BUILT: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixtureObj) {
+      if (
+        !isPlainObject(fixtureObj) ||
+        fixtureObj.schemaVersion !== 1 ||
+        typeof fixtureObj.case !== "string" ||
+        !isPlainObject(fixtureObj.expectedResults)
+      ) {
+        console.error("PACKAGE NOT BUILT: FIXTURE_INVALID");
+        process.exitCode = 1;
+        fixtureObj = null;
+      } else {
+        for (const n of Object.keys(REQUIRED_READY)) {
+          const val = fixtureObj.expectedResults[n];
+          if (typeof val !== "string" || val.length === 0) {
+            console.error("PACKAGE NOT BUILT: FIXTURE_INVALID");
+            process.exitCode = 1;
+            fixtureObj = null;
+            break;
+          }
+          upstream[n] = val;
+        }
+      }
+    }
+  } else {
+    // Live mode: read each task-N evidence file in turn.
+    for (const n of Object.keys(REQUIRED_READY)) {
+      const r = await readUpstreamResult(n);
+      if (!r) {
+        upstream[n] = null;
+      } else {
+        upstream[n] = r.result;
+      }
+    }
+  }
+
+  if (fixtureObj === null && fixtureMode) {
+    // The fixture was malformed; we already emitted a NOT BUILT and set exitCode.
+  } else {
+    // Build the blockers list: every upstream that does not match its
+    // REQUIRED_READY is a blocker. The blockers array preserves the
+    // EXACT upstream string so downstream consumers can match on it.
+    const blockers = [];
+    for (const n of Object.keys(REQUIRED_READY)) {
+      const actual = upstream[n];
+      if (actual !== REQUIRED_READY[n]) {
+        // The actual string is verbatim from upstream. If upstream is
+        // null (file missing) we still record a placeholder blocker so
+        // the array length matches the count of non-READY items.
+        blockers.push(actual === null ? `${REQUIRED_READY[n].replace(/ READY$/, " NOT READY: EVIDENCE_MISSING")}` : actual);
+      }
+    }
+
+    if (blockers.length > 0) {
+      await writeBlockers(blockers);
+      // Top-level code is UPSTREAM_BLOCKER; the first non-READY
+      // upstream is included as a hint on the machine result line per
+      // the plan body, but the canonical machine result is the bare
+      // code so downstream consumers can match on it.
+      console.log("PACKAGE NOT BUILT: UPSTREAM_BLOCKER");
+      console.error(`blockers=${JSON.stringify(blockers)}`);
+      await writeEvidence({
+        task: 14,
+        mode: fixtureMode ? "fixture" : "live",
+        machineResult: "PACKAGE NOT BUILT: UPSTREAM_BLOCKER",
+        exitCode: 1,
+        upstream: { ...upstream },
+        required: { ...REQUIRED_READY },
+        blockers,
+        blockersPath: ".omo/evidence/task-14-blockers.json",
+        fixturePath: usedFixturePath,
+        notes: "One or more upstream Todo results are non-READY. See task-14-blockers.json for the verbatim list.",
+      });
+      process.exitCode = 1;
+    } else {
+      // Upstream is all READY. Run the synthetic-archive check if a
+      // packageValidatorFixturePath is supplied (live mode never
+      // supplies one, fixture mode may). When no archive fixture is
+      // supplied we still emit PACKAGE PREFLIGHT READY because the
+      // upstream gate is the substantive branch.
+      const archiveFixturePath = typeof fixtureObj?.packageValidatorFixturePath === "string"
+        ? fixtureObj.packageValidatorFixturePath
+        : null;
+
+      if (archiveFixturePath) {
+        let archiveVerdict = null;
+        try {
+          const helperPath = resolve(process.cwd(), "scripts", "package-validator.mjs");
+          const mod = await import(pathToFileURL(helperPath).href);
+          const body = await readFile(resolve(process.cwd(), archiveFixturePath), "utf8");
+          const parsed = JSON.parse(body);
+          archiveVerdict = mod.scanSyntheticArchive(parsed);
+        } catch {
+          archiveVerdict = { ok: false, code: "PACKAGE_VALIDATOR_UNAVAILABLE" };
+        }
+        if (!archiveVerdict.ok) {
+          const code = archiveVerdict.code || "ARCHIVE_CONTAMINATED";
+          await writeEvidence({
+            task: 14,
+            mode: fixtureMode ? "fixture" : "live",
+            machineResult: `PACKAGE NOT BUILT: ${code}`,
+            exitCode: 1,
+            upstream: { ...upstream },
+            required: { ...REQUIRED_READY },
+            blockers: [],
+            blockersPath: ".omo/evidence/task-14-blockers.json",
+            fixturePath: usedFixturePath,
+            archiveFixturePath,
+            archiveMessage: archiveVerdict.message || null,
+            notes: "All upstream Todo results are READY but the synthetic archive failed the package-validator scan.",
+          });
+          console.log(`PACKAGE NOT BUILT: ${code}`);
+          if (archiveVerdict.message) console.error(archiveVerdict.message);
+          process.exitCode = 1;
+        } else {
+          await writeEvidence({
+            task: 14,
+            mode: fixtureMode ? "fixture" : "live",
+            machineResult: "PACKAGE PREFLIGHT READY",
+            exitCode: 0,
+            upstream: { ...upstream },
+            required: { ...REQUIRED_READY },
+            blockers: [],
+            blockersPath: ".omo/evidence/task-14-blockers.json",
+            fixturePath: usedFixturePath,
+            archiveFixturePath,
+            archiveSha256: archiveVerdict.archiveSha256,
+            archiveByteLength: archiveVerdict.byteLength,
+            archiveEntryCount: archiveVerdict.entryCount,
+            notes: "All upstream Todo results are READY and the synthetic archive passed the package-validator scan.",
+          });
+          console.log("PACKAGE PREFLIGHT READY");
+        }
+      } else {
+        await writeEvidence({
+          task: 14,
+          mode: fixtureMode ? "fixture" : "live",
+          machineResult: "PACKAGE PREFLIGHT READY",
+          exitCode: 0,
+          upstream: { ...upstream },
+          required: { ...REQUIRED_READY },
+          blockers: [],
+          blockersPath: ".omo/evidence/task-14-blockers.json",
+          fixturePath: usedFixturePath,
+          archiveFixturePath: null,
+          notes: "All upstream Todo results are READY. No synthetic archive fixture was supplied; the archive scan is skipped for this invocation.",
+        });
+        console.log("PACKAGE PREFLIGHT READY");
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

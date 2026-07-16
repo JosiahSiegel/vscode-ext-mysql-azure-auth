@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "case": "upstream-blocked",
+  "description": "Upstream Todo 1 is non-READY (BASELINE NOT READY: TEST_FAIL). The validator must emit PACKAGE NOT BUILT: UPSTREAM_BLOCKER exit 1 and write a blockers array containing every non-READY upstream string verbatim. The other 12 tasks are declared READY in the expectedResults map; in this fixture the four planned blockers are Tasks 1, 3, 4, 12 (mirroring the live chain at HEAD 0be19f9).",
+  "expectedResults": {
+    "1": "BASELINE NOT READY: TEST_FAIL",
+    "2": "CONTRACT READY",
+    "3": "FRESH PUBLIC ROOT REQUIRED",
+    "4": "GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY",
+    "5": "PRIVACY READY",
+    "6": "SURFACE READY",
+    "7": "MANIFEST READY",
+    "8": "CORE CLEANUP READY",
+    "9": "REFRESH RECOVERY READY",
+    "10": "LOGGING READY",
+    "11": "DOCUMENTATION READY",
+    "12": "IDENTITY NOT READY: MISSING_OWNER_IDENTITY",
+    "13": "SECURITY READY"
+  },
+  "blockers": [
+    "BASELINE NOT READY: TEST_FAIL",
+    "FRESH PUBLIC ROOT REQUIRED",
+    "GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY",
+    "IDENTITY NOT READY: MISSING_OWNER_IDENTITY"
+  ],
+  "packageValidatorFixturePath": null,
+  "expectedResult": "PACKAGE NOT BUILT: UPSTREAM_BLOCKER",
+  "expectedExitCode": 1
+}

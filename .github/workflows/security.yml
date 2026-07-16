@@ -8,7 +8,7 @@
 #   - npm audit: runtime only, level=high
 #   - gitleaks: pinned release, downloaded through scripts/run-gitleaks.mjs
 #     using immutable SHAs recorded in scripts/tool-checksums.json
-#   - cyclonedx-npm 4.0.3 SBOM, license-checker-rseidelsohn 4.4.2 inventory
+#   - cyclonedx-npm 6.0.0 SBOM, license-checker-rseidelsohn 4.4.2 inventory
 #
 # The companion `.github/dependabot.yml` schedules monthly upgrades for both
 # the npm and GitHub Actions ecosystems. All actions here are SHA-pinned so

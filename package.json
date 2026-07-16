@@ -236,16 +236,20 @@
     "@typescript-eslint/parser": "^7.0.0",
     "@vscode/test-electron": "^2.4.0",
     "@vscode/vsce": "3.9.2",
-    "@cyclonedx/cyclonedx-npm": "4.0.3",
+    "@cyclonedx/cyclonedx-npm": "^6.0.0",
     "license-checker-rseidelsohn": "4.4.2",
     "spdx-expression-parse": "5.0.0",
     "spdx-satisfies": "6.0.0",
     "esbuild": "^0.27.3",
     "eslint": "^8.56.0",
     "glob": "^10.3.10",
-    "mocha": "^10.2.0",
+    "mocha": "^11.0.0",
     "sharp": "^0.35.3",
     "sinon": "^17.0.1",
     "typescript": "^5.3.0"
+  },
+  "overrides": {
+    "serialize-javascript": "^7.0.5",
+    "diff": "^9.0.0"
   }
 }

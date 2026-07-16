@@ -22,6 +22,7 @@ esbuild.config.test.js
 esbuild.config.integration.js
 .omo/**
 .playwright-mcp/**
+.npm-cache/**
 *.log
 *.vsix
 .DS_Store

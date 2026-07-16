@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "case": "valid",
+  "description": "Todo 11 happy-path fixture. Validates the documented README and BUILD against the pinned authoritative-source snapshots and the locked product sentence. Should emit DOCUMENTATION READY when run against the live tree after the Todo 11 edits."
+}

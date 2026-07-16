@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "absolute-reliability-claim",
+  "description": "Negative fixture: injects a README that still promises \"the socket never drops\" and \"no query loss\". Expects DOCUMENTATION NOT READY: ABSOLUTE_CLAIM.",
+  "readmeBody": "# MySQL Azure Auth\n\nA community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.\n\nThe rotation is fault tolerant so the socket never drops. With the drain-and-replace path there is no query loss.\n"
+}

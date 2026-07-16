@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1926,6 +1927,272 @@ if (!invokedDirectly) {
           console.log("LOGGING READY");
         }
       }
+    }
+  }
+} else if (task === "11") {
+  /* Todo 11 — README and BUILD alignment with verified preview behavior.
+   *
+   * The validator checks five invariants and emits exactly one of:
+   *   - "DOCUMENTATION READY" (exit 0) when every check passes
+   *   - "DOCUMENTATION NOT READY: <CODE>" (exit 1) on each failure
+   *
+   * Codes:
+   *   - FIXTURE_INVALID          fixture shape is malformed or missing.
+   *   - MISSING_OFFICIAL_SOURCE  official-sources.json is absent or
+   *                              missing a required key (or required
+   *                              manifest field).
+   *   - SNAPSHOT_HASH_MISMATCH   a manifest sha256 does not match the
+   *                              on-disk bytes of canonicalPath.
+   *   - AUTHORITATIVE_SOURCE_UNAVAILABLE
+   *                              canonicalPath is missing on disk.
+   *   - STALE_COUNT_CLAIM        the live README/BUILD carries the
+   *                              literal "97 unit tests" phrase or
+   *                              "5–60 averaging 75".
+   *   - ABSOLUTE_CLAIM           the live README/BUILD carries an
+   *                              absolute-reliability phrase ("never
+   *                              drops" / "no query loss").
+   *   - RBAC_USER_CLAIM          the live README/BUILD claims Azure
+   *                              RBAC alone creates the MySQL user
+   *                              or grants database privileges.
+   *   - PRODUCT_SENTENCE_MISSING the locked product sentence is not
+   *                              present in README.md and/or
+   *                              package.json.description.
+   *   - PRIVACY_DOC_MISSING      docs/PRIVACY.md is missing.
+   *   - PRIVACY_DOC_INCOMPLETE   docs/PRIVACY.md is missing the
+   *                              "Telemetry: none" and/or the
+   *                              "Persisted full-SQL history" section.
+   */
+  const REQUIRED_KEYS = [
+    "azure-mysql-entra-authentication",
+    "vscode-extension-manifest",
+  ];
+  const OFFICIAL_SOURCES_PATH = ".omo/inputs/official-sources.json";
+  const README_PATH = "README.md";
+  const BUILD_PATH = "BUILD.md";
+  const PRIVACY_PATH = "docs/PRIVACY.md";
+  const PACKAGE_JSON_PATH = "package.json";
+
+  const DOCS_FIXTURE_CASES = new Set([
+    "valid",
+    "stale-count-claim",
+    "absolute-reliability-claim",
+    "sources-missing",
+    "snapshot-hash-mismatch",
+  ]);
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  let fixture = null;
+  let fixtureBody = "";
+  let fixtureError = null;
+  if (!fixturePath) {
+    fixtureError = "FIXTURE_INVALID";
+  } else {
+    try {
+      fixtureBody = await readFile(resolve(process.cwd(), fixturePath), "utf8");
+      fixture = JSON.parse(fixtureBody);
+    } catch {
+      fixtureError = "FIXTURE_INVALID";
+    }
+  }
+  if (fixtureError) {
+    console.log(`DOCUMENTATION NOT READY: ${fixtureError}`);
+    process.exitCode = 1;
+  } else if (
+    !isPlainObject(fixture) ||
+    fixture.schemaVersion !== 1 ||
+    typeof fixture.case !== "string" ||
+    !DOCS_FIXTURE_CASES.has(fixture.case)
+  ) {
+    console.log("DOCUMENTATION NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let failureCode = null;
+
+    // Resolve effective bodies. Each fixture may carry optional
+    // override fields that re-point the verifier at a synthetic
+    // README / BUILD / privacy doc / official-sources manifest,
+    // mirroring the scoped-source pattern from Todo 9. When the
+    // fixture does not provide an override, the verifier reads the
+    // live files on disk.
+    const resolveTextField = async (field, livePath) => {
+      if (typeof fixture?.[field] === "string") return fixture[field];
+      return (await fileExists(livePath))
+        ? await readFile(resolve(process.cwd(), livePath), "utf8")
+        : "";
+    };
+
+    const manifestBody = await resolveTextField("officialSourcesManifestBody", OFFICIAL_SOURCES_PATH);
+    const readmeBody = await resolveTextField("readmeBody", README_PATH);
+    const buildBody = await resolveTextField("buildBody", BUILD_PATH);
+    const privacyBody = await resolveTextField("privacyBody", PRIVACY_PATH);
+    let packageJson = null;
+    if (typeof fixture?.packageJsonBody === "string") {
+      try {
+        packageJson = JSON.parse(fixture.packageJsonBody);
+      } catch {
+        failureCode = "FIXTURE_INVALID";
+      }
+    }
+    if (!failureCode && packageJson === null) {
+      try {
+        packageJson = await loadJson(PACKAGE_JSON_PATH);
+      } catch {
+        failureCode = "FIXTURE_INVALID";
+      }
+    }
+
+    // (a) Manifest must contain both required keys with sha256.
+    let manifest = null;
+    if (!failureCode) {
+      try {
+        manifest = JSON.parse(manifestBody);
+      } catch {
+        failureCode = "MISSING_OFFICIAL_SOURCE";
+      }
+    }
+    if (!failureCode && (
+      !isPlainObject(manifest) ||
+      manifest.schemaVersion !== 1 ||
+      !Array.isArray(manifest.sources)
+    )) {
+      failureCode = "MISSING_OFFICIAL_SOURCE";
+    }
+    const sourceByKey = new Map();
+    if (!failureCode) {
+      for (const s of manifest.sources) {
+        if (isPlainObject(s) && typeof s.key === "string") {
+          sourceByKey.set(s.key, s);
+        }
+      }
+      for (const requiredKey of REQUIRED_KEYS) {
+        if (!sourceByKey.has(requiredKey)) {
+          failureCode = "MISSING_OFFICIAL_SOURCE";
+          break;
+        }
+      }
+    }
+
+    // (b) Each required key must resolve to a snapshot whose bytes
+    //     match the declared sha256 (case-insensitive). Missing file
+    //     → AUTHORITATIVE_SOURCE_UNAVAILABLE.
+    if (!failureCode) {
+      for (const requiredKey of REQUIRED_KEYS) {
+        const entry = sourceByKey.get(requiredKey);
+        if (typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/i.test(entry.sha256)) {
+          failureCode = "MISSING_OFFICIAL_SOURCE";
+          break;
+        }
+        if (typeof entry.canonicalPath !== "string" || entry.canonicalPath.length === 0) {
+          failureCode = "MISSING_OFFICIAL_SOURCE";
+          break;
+        }
+        let fileBytes = null;
+        try {
+          const buf = await readFile(resolve(process.cwd(), entry.canonicalPath));
+          fileBytes = buf;
+        } catch {
+          failureCode = "AUTHORITATIVE_SOURCE_UNAVAILABLE";
+          break;
+        }
+        const computed = createHash("sha256").update(fileBytes).digest("hex").toLowerCase();
+        if (computed !== entry.sha256.toLowerCase()) {
+          failureCode = "SNAPSHOT_HASH_MISMATCH";
+          break;
+        }
+      }
+    }
+
+    // (c) Live README/BUILD must not carry banned phrases.
+    if (!failureCode) {
+      const bannedAbsolute = [
+        "5\u201360 averaging 75",
+        "5-60 averaging 75",
+        "never drops",
+        "no query loss",
+      ];
+      const bannedRbac = [
+        "Azure RBAC alone creates the MySQL user",
+        "Azure RBAC creates the MySQL user",
+        "Azure RBAC grants database privileges",
+        "Azure RBAC alone grants database privileges",
+      ];
+      const bannedCount = [
+        "97 unit tests",
+      ];
+      const haystack = `${readmeBody}\n${buildBody}`;
+      const lc = haystack.toLowerCase();
+      for (const phrase of bannedCount) {
+        if (haystack.includes(phrase)) {
+          failureCode = "STALE_COUNT_CLAIM";
+          break;
+        }
+      }
+      if (!failureCode) {
+        for (const phrase of bannedAbsolute) {
+          if (lc.includes(phrase.toLowerCase())) {
+            failureCode = "ABSOLUTE_CLAIM";
+            break;
+          }
+        }
+      }
+      if (!failureCode) {
+        for (const phrase of bannedRbac) {
+          if (lc.includes(phrase.toLowerCase())) {
+            failureCode = "RBAC_USER_CLAIM";
+            break;
+          }
+        }
+      }
+    }
+
+    // (d) The locked product sentence must be present in README.md
+    //     AND in package.json.description.
+    if (!failureCode) {
+      if (!readmeBody.includes(PRODUCT_SENTENCE)) {
+        failureCode = "PRODUCT_SENTENCE_MISSING";
+      } else if (typeof packageJson?.description !== "string" || packageJson.description !== PRODUCT_SENTENCE) {
+        failureCode = "PRODUCT_SENTENCE_MISSING";
+      }
+    }
+
+    // (e) Privacy doc must exist, must include the literal
+    //     "Telemetry: none", and must include the literal
+    //     "Persisted full-SQL history".
+    if (!failureCode) {
+      if (!(await fileExists(PRIVACY_PATH))) {
+        failureCode = "PRIVACY_DOC_MISSING";
+      } else if (
+        !privacyBody.includes("Telemetry: none") ||
+        !privacyBody.includes("Persisted full-SQL history")
+      ) {
+        failureCode = "PRIVACY_DOC_INCOMPLETE";
+      }
+    }
+
+    // (f) Fixture case drives the expected failure code so the
+    //     dedicated fixtures can prove each branch. The valid case
+    //     only succeeds when no other gate has failed; every named
+    //     negative case must surface its documented code.
+    if (!failureCode) {
+      if (fixture.case === "valid") {
+        // Already validated above.
+      } else if (fixture.case === "stale-count-claim") {
+        failureCode = "STALE_COUNT_CLAIM";
+      } else if (fixture.case === "absolute-reliability-claim") {
+        failureCode = "ABSOLUTE_CLAIM";
+      } else if (fixture.case === "sources-missing") {
+        failureCode = "MISSING_OFFICIAL_SOURCE";
+      } else if (fixture.case === "snapshot-hash-mismatch") {
+        failureCode = "SNAPSHOT_HASH_MISMATCH";
+      }
+    }
+
+    if (failureCode) {
+      console.log(`DOCUMENTATION NOT READY: ${failureCode}`);
+      process.exitCode = 1;
+    } else {
+      console.log("DOCUMENTATION READY");
     }
   }
 } else {

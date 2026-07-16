@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "snapshot-hash-mismatch",
+  "description": "Negative fixture: keeps both required keys but declares a sha256 that does not match the on-disk bytes. Expects DOCUMENTATION NOT READY: SNAPSHOT_HASH_MISMATCH.",
+  "officialSourcesManifestBody": "{\n  \"schemaVersion\": 1,\n  \"sources\": [\n    {\n      \"key\": \"azure-mysql-entra-authentication\",\n      \"url\": \"https://learn.microsoft.com/en-us/azure/mysql/flexible-server/security-entra-authentication\",\n      \"canonicalPath\": \".omo/inputs/snapshots/azure-mysql-entra-authentication.html\",\n      \"retrievedAt\": \"2026-07-16T00:00:00Z\",\n      \"sha256\": \"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef\",\n      \"retrievalCommand\": \"node scripts/fetch-snapshot.mjs azure-mysql-entra-authentication\"\n    },\n    {\n      \"key\": \"vscode-extension-manifest\",\n      \"url\": \"https://code.visualstudio.com/api/references/extension-manifest\",\n      \"canonicalPath\": \".omo/inputs/snapshots/vscode-extension-manifest.html\",\n      \"retrievedAt\": \"2026-07-16T00:00:00Z\",\n      \"sha256\": \"0000111122223333444455556666777788889999000011112222333344445555\",\n      \"retrievalCommand\": \"node scripts/fetch-snapshot.mjs vscode-extension-manifest\"\n    }\n  ]\n}\n"
+}

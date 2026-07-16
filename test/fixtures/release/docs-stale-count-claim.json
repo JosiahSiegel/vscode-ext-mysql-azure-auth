@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "stale-count-claim",
+  "description": "Negative fixture: injects a README that still carries the stale \"97 unit tests\" phrase. Expects DOCUMENTATION NOT READY: STALE_COUNT_CLAIM.",
+  "readmeBody": "# MySQL Azure Auth\n\nA community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.\n\nThe extension runs 97 unit tests in under 50 ms. These tests cover the credential chain, the drain-and-replace rotation, and the SQL classifier.\n"
+}

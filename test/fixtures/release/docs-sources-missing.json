@@ -1,0 +1,6 @@
+{
+  "schemaVersion": 1,
+  "case": "sources-missing",
+  "description": "Negative fixture: drops both required keys from the official-sources manifest. Expects DOCUMENTATION NOT READY: MISSING_OFFICIAL_SOURCE.",
+  "officialSourcesManifestBody": "{\n  \"schemaVersion\": 1,\n  \"sources\": [\n    {\n      \"key\": \"unrelated-reference\",\n      \"url\": \"https://example.invalid/missing\",\n      \"canonicalPath\": \".omo/inputs/snapshots/unrelated.html\",\n      \"retrievedAt\": \"2026-07-16T00:00:00Z\",\n      \"sha256\": \"0000000000000000000000000000000000000000000000000000000000000000\",\n      \"retrievalCommand\": \"node scripts/fetch-snapshot.mjs unrelated-reference\"\n    }\n  ]\n}\n"
+}

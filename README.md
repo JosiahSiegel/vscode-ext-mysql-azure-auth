@@ -2,34 +2,36 @@
 
 A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.
 
+`0.1.0-Preview` — public preview. Not affiliated with Microsoft, Azure, Oracle, or MySQL.
+
 The extension keeps long-running sessions alive by rotating the Entra access token in the background. In normal use a single session lasts as long as you have VS Code open.
 
 ---
 
 ## Features
 
-- **Entra ID sign-in** — uses VS Code's Microsoft account provider, with the Azure CLI as a transparent fallback.
-- **Self-healing sessions** — Entra tokens for the MySQL Flexible Server audience are valid 5–60 minutes. The extension rotates them automatically every 45 minutes so the socket never drops.
-- **Drain-and-replace rotation** — token refresh builds a brand-new connection pool bound to the new token, then drains the old pool after its in-flight queries finish. No `COM_CHANGE_USER` (which is broken for `mysql_clear_password`), no hard reconnects, no query loss.
+- **Microsoft Entra ID sign-in** — uses VS Code's built-in Microsoft account provider, with the Azure CLI as a transparent fallback.
+- **Drain-and-replace token rotation** — when the cached token nears expiry the extension builds a fresh `mysql.Pool` bound to the new token, routes new work to it, and closes the old pool after its in-flight queries finish.
+- **Read-only session enforcement** — every checkout executes `SET SESSION TRANSACTION READ ONLY` and classifies user SQL through a deny-list (`classifySqlBatch`) before any `pool.execute`. DDL, write, and administrative statements are rejected fail-closed.
 - **Multiple servers** — register as many endpoints as you like; each has its own session and credentials.
-- **Server sidebar** — Servers view in the Activity Bar shows every registered endpoint with its live/idle state. Click to expand and walk tables.
+- **Server sidebar** — the Servers view in the Activity Bar shows every registered endpoint with its live/idle state. Click to expand and walk tables.
 - **Query workbench** — opens a webview per server. Run SQL, see results in a table, export to CSV or JSON.
-- **Preview table rows** — right-click a table to preview 100 rows or view up to 1,000 rows with `SELECT * FROM ... LIMIT N`; this is read-only browsing, not row editing.
-- **Strict input validation** — ports are bounds-checked at the wizard boundary; dismissed TLS picker is never silent.
-- **Typed everywhere** — the public surface is pinned by `src/test/unit/publicSurface.test.ts`. Any drift to the manifest fails CI.
+- **History** — per-server SQL history is exposed through the Query Workbench picker, bounded by `mysqlAzureAuth.historyLimit` (default 100, range 0–10000).
 
 ---
 
 ## Prerequisites
 
-1. **VS Code ≥ 1.85.0** (built-in Microsoft authentication provider is required)
+1. **VS Code ≥ 1.85.0** (built-in Microsoft authentication provider is required).
 2. A Microsoft account that has access to your MySQL Flexible Server. Sign in via the Microsoft sign-in flow that VS Code shows when you first connect (no separate extension required).
-3. *(Optional)* **Azure CLI** (`az`) — only needed if the VS Code Microsoft auth provider isn't available. The extension will fall back to it transparently.
+3. *(Optional)* **Azure CLI** (`az`) — only needed if the VS Code Microsoft auth provider is unavailable. The extension falls back to it transparently.
    - Windows: <https://learn.microsoft.com/cli/azure/install-azure-cli-windows>
    - macOS: `brew install azure-cli`
    - Linux: <https://learn.microsoft.com/cli/azure/install-azure-cli-linux>
-4. **Azure Database for MySQL Flexible Server** with Entra ID authentication enabled.
-5. An Entra principal (user or group) with at least the `Read` data-plane role on the Flexible Server's `Azure OSSRDBMS Database` resource.
+4. **Azure Database for MySQL Flexible Server** with Microsoft Entra ID authentication enabled.
+5. An Entra principal (user or group) that has both:
+   - the data-plane role you want on the server (`Reader` is sufficient for browsing), and
+   - a matching MySQL-side user with the read-only database grants you intend (see "Least-privilege setup" below).
 
 > The extension does **not** depend on the Azure Account extension (deprecated January 2025). Sign-in goes through VS Code's built-in Microsoft provider.
 
@@ -38,13 +40,34 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 1. In the Azure Portal, open your **Flexible Server** → **Security** → **Authentication**.
 2. Set the authentication mode to **Microsoft Entra ID only** or **MySQL and Microsoft Entra ID**.
 3. Click **Set Admin** and pick the principal you want to use.
-4. Connect with your admin credentials and create the MySQL-side user that matches the Entra principal:
+4. Connect with your admin credentials and run:
+
    ```sql
    CREATE USER 'you@your-tenant.com'@'%' IDENTIFIED BY 'token-placeholder';
-   GRANT ALL PRIVILEGES ON your_database.* TO 'you@your-tenant.com'@'%';
+   GRANT SELECT ON your_database.* TO 'you@your-tenant.com'@'%';
    FLUSH PRIVILEGES;
    ```
+
    The `'token-placeholder'` value is required by MySQL syntax but is ignored at authentication time — Entra tokens are validated by the server's AAD plugin.
+
+### Least-privilege setup
+
+The extension reads from the database; it does not modify schema or data. To minimise blast radius:
+
+- Grant `SELECT` on the schemas you actually want to browse.
+- If you only need metadata, also grant `SHOW VIEW` / `PROCESS` only where required.
+- Do **not** grant `ALL PRIVILEGES` to the principal the extension signs in as.
+- Azure RBAC on the server and MySQL-side grants are separate. Granting an Azure data-plane role does **not** create the MySQL user or grant database privileges; you must run the `CREATE USER` / `GRANT` statements above.
+
+### Read-only session is mandatory
+
+Every session the extension opens is read-only:
+
+- On checkout, the session wrapper runs `SET SESSION TRANSACTION READ ONLY`.
+- User SQL is passed through `classifySqlBatch` before any `pool.execute`. The classifier rejects mutations, DDL, administrative statements, and unsupported statements fail-closed.
+- The form does not expose a read-only toggle — there is no write mode to opt out of.
+
+If a write statement is submitted, the session returns `READ_ONLY_REJECTED` and the connection is closed. The Azure RBAC grants you choose do not change this behaviour; the read-only enforcement is application-side and applies to every session regardless of the account's database privileges.
 
 ---
 
@@ -53,12 +76,12 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 1. Open the **MySQL Azure Auth** view in the Activity Bar.
 2. Click **+ Register Server** (or run **MySQL Azure Auth: Register Server**).
 3. Fill in:
-   - **Display label** — a friendly name (e.g. `production-analytics`)
-   - **Flexible Server hostname** — your `*.mysql.database.azure.com` FQDN
-   - **TCP port** — defaults to 3306; must be 1–65535
-   - **Default schema** — the database to bind to
-   - **Entra principal** — your Entra group name (e.g. `DBA Team`) or your personal email
-   - **Transport encryption** — `Encrypt (recommended)` (default) or `Plaintext` (warns on selection)
+   - **Display label** — a friendly name (e.g. `production-analytics`).
+   - **Flexible Server hostname** — your `*.mysql.database.azure.com` FQDN.
+   - **TCP port** — defaults to 3306; must be 1–65535.
+   - **Database** — the schema to bind to (free text; selection is intentionally not automated).
+   - **Entra principal** — your Entra group name (e.g. `DBA Team`) or your personal email.
+   - **Transport encryption** — `Encrypt (recommended)` (default) or `Plaintext` (warns on selection).
 4. Right-click the new server → **Open Session**.
 5. Expand the server to see tables. Right-click a table → **Preview Rows** for a quick `SELECT * FROM ... LIMIT 100`.
 6. From a connected server, run **Open Workbench** to get a SQL editor.
@@ -73,22 +96,26 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 │                                                                     │
 │  IdentityProvider.getToken()                                       │
 │    1. Check token cache (60s safety margin)                        │
-│    2. Hit cache miss -> ChainedIdentityProvider.getToken()         │
+│    2. Cache miss -> ChainedTokenCredential.getToken()              │
 │       a. VSCodeIdentitySource (VS Code Microsoft sign-in)          │
-│       b. AzureCliCredential (@azure/identity, transparent az CLI)  │
+│       b. AzureCliCredential (Azure CLI; transparent fallback)      │
 │    3. Cache the new token; remember expiresOnTimestamp              │
 │                                                                     │
 │  DatabaseSession.connect()                                         │
 │    1. Build mysql.Pool bound to the token (authPlugins closure)    │
-│    2. Start a 45-minute setInterval (unref'd) that calls swapToken()│
+│    2. Open a connection, run SET SESSION TRANSACTION READ ONLY     │
+│    3. Install the refresh interval (45 min, unref'd)                │
 │                                                                     │
-│  Every 45 minutes:                                                  │
-│    ActorRegistry refreshes each session via DatabaseSession         │
-│      .swapToken():                                                  │
-│        1. Build NEW pool bound to the fresh token                   │
-│        2. Atomically route new work to the new pool                 │
-│        3. Wait for the old pool's in-flight queries to drain        │
-│        4. Close the old pool                                       │
+│  Token rotation (every 45 min, on demand, or on token expiry):      │
+│    ActorRegistry swaps the session via DatabaseSession.swapToken() │
+│      1. Build a NEW pool bound to the fresh token                   │
+│      2. Atomically route new work to the new pool                   │
+│      3. Wait for the old pool's in-flight queries to drain          │
+│      4. Close the old pool                                         │
+│      On the first refresh failure:                                 │
+│         - retry once after a 5 s delay                             │
+│         - on second failure, mark the actor as failed              │
+│         - close the session best-effort and require Open Session   │
 │                                                                     │
 │  Cancellation / sign-out:                                          │
 │    - VS Code "AuthenticationCancelledNotification" ->              │
@@ -98,13 +125,15 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 └────────────────────────────────────────────────────────────────────┘
 ```
 
+> Device-code sign-in was removed during the preview (deprecated upstream in `sidorares/node-mysql2` and `@azure/identity`). It is not wired in this release; do not rely on it.
+
 ### Why drain-and-replace, not `connection.changeUser()`
 
-`mysql2`'s `Connection.changeUser()` is broken for Azure MySQL Entra token auth (see `sidorares/node-mysql2` issue #3350: `ER_ACCESS_DENIED_ERROR (using password: NO)`). It sends `COM_CHANGE_USER` which strips the cleartext plugin semantics that Azure MySQL requires. Pool-based rotation sidesteps that entirely — we build a new pool for each token, route new queries to it, and close the old pool only after its in-flight work completes.
+`mysql2`'s `Connection.changeUser()` is broken for Azure MySQL Entra token auth (see `sidorares/node-mysql2` issue #3350: `ER_ACCESS_DENIED_ERROR (using password: NO)`). It sends `COM_CHANGE_USER` which strips the cleartext plugin semantics that Azure MySQL requires. Pool-based rotation sidesteps that entirely — the extension builds a new pool for each token, routes new queries to it, and closes the old pool only after its in-flight work completes.
 
-### Token lifetime
+### Token lifetime and rotation
 
-Microsoft issues Entra access tokens with a randomised 5–60 minute lifetime (averaging 75 min) for the `ossrdbms-aad` audience. Token lifetime policy can extend this up to 24 hours per tenant, but is rarely applied. We refresh every 45 minutes to stay safely under the ceiling. To change the interval, edit `src/registry/connectionLifecycle.ts`.
+Microsoft issues Entra access tokens with a randomised lifetime for the `ossrdbms-aad` audience. Token-lifetime policy can extend or shorten this per tenant, but defaults are typically well under an hour. The extension rotates when the cached token's `expiresOnTimestamp` is within 60 seconds, and otherwise on a 45-minute cadence. To change the interval, edit `src/registry/actorRegistry.ts` (`DEFAULT_REFRESH_MS`).
 
 ---
 
@@ -118,10 +147,11 @@ src/
   identity/
     entraToken.ts                  EntraTokenProvider facade
     vscodeAuth.ts                  VSCodeIdentitySource (TokenCredential)
+    safeDiagnostic.ts              allowlist-only diagnostic formatter
   registry/
-    actorRegistry.ts               per-ID actors + state machine
-    databaseSession.ts             mysql.Pool wrapper with drain-and-replace
-    connectionLifecycle.ts         ConnectionHandle facade (legacy compat)
+    actorRegistry.ts               per-ID actors + state machine (rotation, retry)
+    databaseSession.ts             mysql.Pool wrapper, read-only checkout, drain-and-replace
+    sqlClassifier.ts               classifyStatement / classifySqlBatch (deny-list)
     connectionCatalog.ts           globalState persistence (zod-validated)
     legacyWire.ts                  QueryOutcome -> legacy QueryResult adapter
   schema/
@@ -136,8 +166,10 @@ src/
     mocks/vscode.ts                in-memory vscode API for unit tests
     suite/index.ts                 Mocha loader for @vscode/test-electron
     extension.integration.test.ts  real VS Code host smoke test
-    unit/*.test.ts                 97 unit tests (Mocha TDD)
+    unit/*.test.ts                 unit tests (Mocha TDD; count is generated from CI)
 ```
+
+> The unit-test count is generated from CI output; do not hard-code.
 
 ### Where state lives
 
@@ -153,7 +185,7 @@ src/
 ## Building & packaging
 
 ```bash
-npm install
+npm ci
 npm run compile           # build main.js + integration test entries
 npm run build:test        # bundle unit tests with the vscode mock
 npm test                  # lint + typecheck + unit + integration
@@ -166,9 +198,45 @@ See `BUILD.md` for troubleshooting tips and pre-publish checks.
 
 ## Customization points
 
-- **Refresh interval** — `src/registry/connectionLifecycle.ts` exposes `refreshIntervalMs` on `MySqlClientOptions`. Default: 45 min.
+- **Refresh interval** — `src/registry/actorRegistry.ts` exposes `DEFAULT_REFRESH_MS`. Default: 45 min.
 - **Identity chain order** — pass a custom `fallback` (or a full `primary` + `fallback` pair) into `new EntraTokenProvider({...})` in `src/main.ts` to add or replace identity sources. The well-supported `@azure/identity` primitives compose naturally.
 - **Form copy** — all user-facing strings live in `src/forms/connectionForm.ts` and `src/main.ts`. Adjust wording without touching schema or registry code.
+
+---
+
+## Known failures of this preview
+
+The preview deliberately does not support:
+
+- **Row or schema editing.** There are no `editRows` / `createTable` / `dropTable` commands and no DDL flows.
+- **DDL or write SQL.** Mutating statements (INSERT/UPDATE/DELETE/...), administrative statements (GRANT/REVOKE/CALL/...), and DDL (CREATE/ALTER/DROP/...) are rejected by `classifySqlBatch` before any pool dispatch.
+- **Telemetry.** No analytics SDK is embedded. The only outbound calls are the VS Code Microsoft auth provider, Azure CLI (fallback), and the MySQL Flexible Server itself.
+- **Marketplace publishing.** This release is a community preview. There is no Marketplace listing yet.
+- **Device-code sign-in.** Removed during the preview; use the VS Code Microsoft auth provider or the Azure CLI fallback.
+- **Schema-aware wizard pickers.** The "Database" field is free text; the form does not query the server during entry.
+
+Recovery semantics are bounded: a single refresh failure is retried after 5 seconds; a second failure marks the actor as `failed` and requires the user to run **Open Session** again. The extension does not promise that arbitrary network or server outages are transparent.
+
+---
+
+## Privacy and data
+
+- **Telemetry:** none. The extension does not embed Application Insights, Sentry, or any other analytics SDK.
+- **Persisted full-SQL history:** the Query Workbench stores the literal SQL the user submitted, per server, bounded by `mysqlAzureAuth.historyLimit`. Forget Server wipes the matching history key in one step.
+- **Persisted connection metadata:** only the display label, hostname, port, database, principal, and TLS flag are stored in `globalState`. No tokens, passwords, client secrets, or refresh tokens are persisted.
+- **In-memory token cache:** the Entra access token lives only in process memory; it is cleared on deactivation.
+
+See `docs/PRIVACY.md` for the authoritative privacy policy.
+
+---
+
+## Governance
+
+This is a community preview, not affiliated with Microsoft, Azure, Oracle, or MySQL. Trademarks belong to their respective owners; references are nominative only.
+
+- Security: see `SECURITY.md`
+- Contributing: see `CONTRIBUTING.md`
+- Support: see `SUPPORT.md`
 
 ---
 

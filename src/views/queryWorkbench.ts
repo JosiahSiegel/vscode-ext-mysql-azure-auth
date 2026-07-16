@@ -6,6 +6,7 @@ import {
     GlobalStateConnectionCatalog,
     queryHistoryKey,
 } from '../registry/connectionCatalog';
+import safeDiagnostic from '../identity/safeDiagnostic';
 import { CatalogReader } from '../schema/catalogReader';
 import { toCsv, toMarkdown } from './queryFormats';
 import { buildQueryWorkbenchHtml, createNonce, escapeHtml } from './queryWorkbenchHtml';
@@ -366,7 +367,20 @@ export class QueryWorkbench {
             // Webview postMessage can reject if the panel was disposed
             // mid-flight or the message was rejected by VS Code's CSP.
             // Swallow so a transient failure doesn't crash the host.
-            console.error('[mysqlAzureAuth] postMessage failed', error);
+            // Routing every external diagnostic through the formatter keeps
+            // raw error text, stacks, and any embedded secrets out of the
+            // release evidence. The error itself remains in memory for
+            // local control flow above.
+            // eslint-disable-next-line no-console
+            console.log(
+                '[mysqlAzureAuth] postMessage failed',
+                safeDiagnostic({
+                    operation: 'queryWorkbench:postMessage',
+                    credentialSource: 'unknown',
+                    errorClass: 'class:webview_error',
+                })
+            );
+            void error;
         });
     }
 

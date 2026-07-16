@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "case": "bearer-leak",
+  "description": "Negative logging fixture. The fixture's `event.operation` carries a Bearer authorization header literal. The Todo 10 validator runs formatDiagnostic against it and must emit LOGGING NOT READY: BEARER_LEAK with exit 1. Demonstrates that any Bearer-shaped substring in a value triggers the leak gate before the event can be emitted.",
+  "event": {
+    "operation": "Authorization: Bearer abc.def.ghi-jkl_mno=pqr",
+    "credentialSource": "unknown"
+  }
+}

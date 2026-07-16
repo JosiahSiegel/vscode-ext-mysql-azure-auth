@@ -15,6 +15,7 @@ import { ActorRegistry } from './registry/actorRegistry';
 import { ServerTree, WelcomeNode } from './views/connectionExplorer';
 import { QueryWorkbench } from './views/queryWorkbench';
 import { EntraTokenProvider } from './identity/entraToken';
+import safeDiagnostic from './identity/safeDiagnostic';
 import { showServerForm } from './forms/serverForm';
 import { openSession } from './commands/openSession';
 import type { ConnectionConfig } from './domain';
@@ -56,8 +57,20 @@ export function activate(context: vscode.ExtensionContext): void {
         const stack = err instanceof Error ? err.stack : undefined;
         logChannel.appendLine(`[activate] FATAL: composition failed: ${message}`);
         if (stack) logChannel.appendLine(stack);
+        // Routing every external diagnostic through the formatter keeps
+        // raw error text, stacks, and any embedded secrets out of the
+        // release evidence. The error itself remains in memory for the
+        // appended line above and the user-facing toast below.
         // eslint-disable-next-line no-console
-        console.error('[mysql-azure-auth] composition failed', err);
+        console.log(
+            '[mysql-azure-auth] composition failed',
+            safeDiagnostic({
+                operation: 'activate:composition',
+                credentialSource: 'unknown',
+                errorClass: 'class:connection_error',
+            })
+        );
+        void err;
         void vscode.window.showErrorMessage(
             `MySQL Azure Auth failed to activate: ${message}. Check the "MySQL Azure Auth" output channel.`
         );
@@ -377,8 +390,21 @@ async function connectServer(
         const stack = err instanceof Error ? err.stack : undefined;
         logChannel.appendLine(`[connectServer] FAILED for ${config.id}: ${message}`);
         if (stack) logChannel.appendLine(stack);
+        // Routing every external diagnostic through the formatter keeps
+        // raw error text, stacks, and any embedded secrets out of the
+        // release evidence. The error itself remains in memory for the
+        // appended line above and the user-facing toast below.
         // eslint-disable-next-line no-console
-        console.error('[mysql-azure-auth] connectServer failed', err);
+        console.log(
+            '[mysql-azure-auth] connectServer failed',
+            safeDiagnostic({
+                operation: 'connectServer',
+                credentialSource: 'unknown',
+                errorClass: 'class:connection_error',
+                connectionState: 'failed',
+            })
+        );
+        void err;
         void vscode.window.showErrorMessage(
             `Connect failed: ${message}. See the "MySQL Azure Auth" output channel for the full stack.`
         );

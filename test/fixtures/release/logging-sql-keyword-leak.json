@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "case": "sql-keyword-leak",
+  "description": "Negative logging fixture. The fixture's `event.mysqlErrorCode` carries a SQL boundary keyword. The Todo 10 validator runs formatDiagnostic against it and must emit LOGGING NOT READY: SQL_LEAK with exit 1. Demonstrates that any SQL boundary keyword (SELECT/INSERT/UPDATE/DELETE/CREATE/ALTER/DROP/TRUNCATE/RENAME/GRANT/REVOKE/REPLACE) is rejected even when it appears in a value the caller intended as a benign label.",
+  "event": {
+    "operation": "query:dispatch",
+    "credentialSource": "unknown",
+    "mysqlErrorCode": "ER_QUERY_INTERRUPTED DROP TABLE users"
+  }
+}

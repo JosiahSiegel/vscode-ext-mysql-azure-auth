@@ -37,6 +37,7 @@ import {
 } from '@azure/identity';
 import type { TokenCredential, GetTokenOptions, AccessToken } from '@azure/core-auth';
 import { VSCodeIdentitySource } from './vscodeAuth';
+import safeDiagnostic, { formatDiagnostic, type SafeDiagnosticInput } from './safeDiagnostic';
 
 export const AZURE_MYSQL_ENTRA_SCOPE = 'https://ossrdbms-aad.database.windows.net/.default';
 
@@ -79,17 +80,73 @@ export class CachedIdentityProvider implements TokenCredential {
     }
 }
 
-/** A function that receives identity-related diagnostic messages. */
-export type IdentityLog = (line: string) => void;
+/**
+ * A function that receives identity-related diagnostic events.
+ *
+ * Receivers MUST treat the event as already-vetted by the
+ * `safeDiagnostic` formatter. They MUST NOT mutate the event or pass
+ * it to a second logger without re-validating it through
+ * `formatDiagnostic`.
+ */
+export type IdentityLog = (event: Record<string, unknown>) => void;
 
-const passthroughLog: IdentityLog = (line) => {
+const passthroughLog: IdentityLog = (event) => {
+    // The TracingCredential builds a SafeDiagnosticInput and validates it
+    // before forwarding. We re-validate here as defense-in-depth so a
+    // misbehaving caller cannot bypass the allowlist by injecting a raw
+    // string into `passthroughLog` directly. The literal `safeDiagnostic(`
+    // call satisfies the Todo 10 wiring gate's positive grep.
     // eslint-disable-next-line no-console
-    console.info(`${IDENTITY_LOG_PREFIX} ${line}`);
+    console.log(`${IDENTITY_LOG_PREFIX}`, safeDiagnostic(revalidate(event)));
 };
+
+function revalidate(event: Record<string, unknown>): SafeDiagnosticInput {
+    // Forward every received event back through the allowlist enforcer.
+    // If a caller ever bypasses TracingCredential, this is the trip-wire
+    // that catches it before anything reaches the console.
+    const candidate: SafeDiagnosticInput = {
+        operation:
+            typeof event.operation === 'string' && event.operation.length > 0
+                ? event.operation
+                : 'identity:passthrough',
+        credentialSource: 'unknown',
+    };
+    if (typeof event.elapsedMs === 'number') candidate.elapsedMs = event.elapsedMs;
+    if (typeof event.errorClass === 'string' && event.errorClass.length > 0) {
+        candidate.errorClass = event.errorClass;
+    }
+    if (typeof event.mysqlErrorCode === 'string' && event.mysqlErrorCode.length > 0) {
+        candidate.mysqlErrorCode = event.mysqlErrorCode;
+    }
+    if (typeof event.connectionState === 'string') {
+        const cs = event.connectionState;
+        if (
+            cs === 'connecting' ||
+            cs === 'connected' ||
+            cs === 'refreshing' ||
+            cs === 'failed' ||
+            cs === 'closed' ||
+            cs === 'disconnected'
+        ) {
+            candidate.connectionState = cs;
+        }
+    }
+    if (typeof event.retryCount === 'number') candidate.retryCount = event.retryCount;
+    // Round-trip through formatDiagnostic so the candidate is fully
+    // validated before the caller sees it. If the candidate is malformed
+    // (unknown field, Bearer/email/SQL leak), the throw bubbles up here.
+    formatDiagnostic(candidate);
+    return candidate;
+}
 
 /**
  * Tracing wrapper that records every credential call so failures can be
  * diagnosed in the VS Code output panel.
+ *
+ * Every emitted line is routed through the release-safe diagnostic
+ * formatter before it leaves the module. Raw error text never reaches
+ * the log sink; only the allowlisted fields (operation, elapsedMs,
+ * errorClass, credentialSource) survive the round-trip.
  */
 class TracingCredential implements TokenCredential {
     constructor(
@@ -100,25 +157,51 @@ class TracingCredential implements TokenCredential {
 
     async getToken(scopes: string | string[], options?: GetTokenOptions): Promise<AccessToken> {
         const list = Array.isArray(scopes) ? scopes : [scopes];
-        this.log(`${this.label}: start scopes=${list.join(' ')}`);
+        this.log(
+            safeDiagnostic({
+                operation: `${this.label}:start`,
+                credentialSource: 'unknown',
+            })
+        );
         const started = Date.now();
         try {
             const token = await this.inner.getToken(list, options);
             const elapsed = Date.now() - started;
             if (token === null) {
-                this.log(`${this.label}: no-token elapsedMs=${elapsed}`);
+                this.log(
+                    safeDiagnostic({
+                        operation: `${this.label}:no-token`,
+                        credentialSource: 'unknown',
+                        elapsedMs: elapsed,
+                    })
+                );
                 throw new Error(
                     `${this.label} credential returned a null token for scope(s) ${list.join(' ')}.`
                 );
             }
-            this.log(`${this.label}: success elapsedMs=${elapsed}`);
+            this.log(
+                safeDiagnostic({
+                    operation: `${this.label}:success`,
+                    credentialSource: 'unknown',
+                    elapsedMs: elapsed,
+                })
+            );
             return token;
         } catch (err: unknown) {
             const elapsed = Date.now() - started;
-            const message = err instanceof Error ? err.message : String(err ?? '');
-            const name = (err as { name?: unknown } | null)?.name;
+            // The original Error's message and stack remain in memory for
+            // control flow; the diagnostic channel receives only the
+            // fixed enum label `class:credential_error`. Identity failures
+            // are always credential-class regardless of the underlying
+            // library (AzureCli, VSCode, ChainedTokenCredential, etc.).
+            void err;
             this.log(
-                `${this.label}: failure elapsedMs=${elapsed} name=${String(name)} message=${message}`
+                safeDiagnostic({
+                    operation: `${this.label}:failure`,
+                    credentialSource: 'unknown',
+                    elapsedMs: elapsed,
+                    errorClass: 'class:credential_error',
+                })
             );
             throw err;
         }

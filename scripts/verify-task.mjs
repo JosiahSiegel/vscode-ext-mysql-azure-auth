@@ -1646,6 +1646,288 @@ if (!invokedDirectly) {
       }
     }
   }
+} else if (task === "10") {
+  /* Todo 10 - release-safe diagnostic formatter enforcement.
+   *
+   * The validator checks seven invariants and emits exactly one of:
+   *   - "LOGGING READY" (exit 0) when every check passes
+   *   - "LOGGING NOT READY: <CODE>" (exit 1) on each failure
+   *
+   * Codes:
+   *   - MISSING_FORMATTER   src/identity/safeDiagnostic.ts is absent.
+   *   - MISSING_EXPORTS     the module does not export formatDiagnostic,
+   *                          formatDiagnosticBatch, and getAllowlist.
+   *   - ALLOWLIST_MISMATCH  the live allowlist does not equal the
+   *                          canonical 7-key set.
+   *   - BEARER_LEAK         fixture event triggers a Bearer leak.
+   *   - EMAIL_LEAK          fixture event triggers a principal email leak.
+   *   - SQL_LEAK            fixture event triggers a SQL keyword leak.
+   *   - UNKNOWN_FIELD       fixture event triggers an allowlist rejection.
+   *   - ASSIGNMENT_LEAK     fixture event triggers a password/secret/token
+   *                          assignment leak.
+   *   - NOT_WIRED           any of the three wiring sites lacks a
+   *                          safeDiagnostic() call or still carries a
+   *                          console.error(<error>).
+   *   - FIXTURE_INVALID     the fixture shape is malformed.
+   *
+   * Wiring sites (must each contain at least one safeDiagnostic() call,
+   * and must NOT contain any console.error() inline error printing):
+   *   - src/identity/entraToken.ts
+   *   - src/main.ts
+   *   - src/views/queryWorkbench.ts
+   */
+  const SAFE_DIAGNOSTIC_PATH = "src/identity/safeDiagnostic.ts";
+  const WIRING_SITES = [
+    "src/identity/entraToken.ts",
+    "src/main.ts",
+    "src/views/queryWorkbench.ts",
+  ];
+  const CANONICAL_ALLOWLIST = [
+    "operation",
+    "credentialSource",
+    "elapsedMs",
+    "errorClass",
+    "mysqlErrorCode",
+    "connectionState",
+    "retryCount",
+  ];
+  const LOGGING_FIXTURE_CASES = new Set([
+    "valid",
+    "bearer-leak",
+    "unknown-field",
+    "email-leak",
+    "sql-keyword-leak",
+  ]);
+
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath = fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  if (!fixturePath) {
+    console.error("LOGGING NOT READY: FIXTURE_INVALID");
+    process.exitCode = 1;
+  } else {
+    let fixture = null;
+    try {
+      fixture = await loadJson(fixturePath);
+    } catch {
+      console.error("LOGGING NOT READY: FIXTURE_INVALID");
+      process.exitCode = 1;
+    }
+    if (fixture) {
+      if (
+        !isPlainObject(fixture) ||
+        fixture.schemaVersion !== 1 ||
+        typeof fixture.case !== "string" ||
+        !LOGGING_FIXTURE_CASES.has(fixture.case) ||
+        !isPlainObject(fixture.event)
+      ) {
+        console.error("LOGGING NOT READY: FIXTURE_INVALID");
+        process.exitCode = 1;
+      } else {
+        let failureCode = null;
+
+        // (a) The formatter module must exist on disk.
+        if (!(await fileExists(SAFE_DIAGNOSTIC_PATH))) {
+          failureCode = "MISSING_FORMATTER";
+        }
+
+        // (b) The module must export formatDiagnostic, formatDiagnosticBatch,
+        //     and getAllowlist. We can't import a TypeScript file from plain
+        //     Node, so the validator greps the source for the export
+        //     signatures and the allowlist helper definition.
+        if (!failureCode) {
+          const body = await readFile(
+            resolve(process.cwd(), SAFE_DIAGNOSTIC_PATH),
+            "utf8",
+          );
+          const hasFormatDiagnostic = /\bexport\s+function\s+formatDiagnostic\s*\(/.test(body);
+          const hasBatch = /\bexport\s+function\s+formatDiagnosticBatch\s*\(/.test(body);
+          const hasAllowlist = /\bexport\s+function\s+getAllowlist\s*\(/.test(body);
+          if (!hasFormatDiagnostic || !hasBatch || !hasAllowlist) {
+            failureCode = "MISSING_EXPORTS";
+          }
+        }
+
+        // (c) The canonical 7-key allowlist must be present in source.
+        if (!failureCode) {
+          const body = await readFile(
+            resolve(process.cwd(), SAFE_DIAGNOSTIC_PATH),
+            "utf8",
+          );
+          // Each canonical key must appear as a quoted string literal inside
+          // the allowlist array. We check both single and double quotes.
+          const allPresent = CANONICAL_ALLOWLIST.every((key) =>
+            new RegExp(`['"]${key}['"]`).test(body),
+          );
+          if (!allPresent) {
+            failureCode = "ALLOWLIST_MISMATCH";
+          }
+        }
+
+        // (d) Run the fixture event through a TypeScript-aware check. We
+        //     shell out to `npx tsc` to compile safeDiagnostic.ts to a
+        //     CommonJS module in a temp dir, then require() it and invoke
+        //     formatDiagnostic against the fixture's event. This avoids
+        //     re-implementing the allowlist/leak gates in JS (which would
+        //     drift from the production TS implementation).
+        let tsProbeOk = false;
+        if (!failureCode) {
+          try {
+            const { spawnSync } = await import("node:child_process");
+            const { writeFile, mkdir, rm } = await import("node:fs/promises");
+            const probeDir = resolve(process.cwd(), ".omo/evidence/logging-t10-probe");
+            await rm(probeDir, { recursive: true, force: true });
+            await mkdir(probeDir, { recursive: true });
+            // Mirror the source file under the probe dir so the driver
+            // can import it via a stable relative path.
+            const safeSourceAbs = resolve(process.cwd(), SAFE_DIAGNOSTIC_PATH);
+            const safeMirrorAbs = resolve(probeDir, "safeDiagnostic.ts");
+            const safeBody = await readFile(safeSourceAbs, "utf8");
+            await writeFile(safeMirrorAbs, safeBody, "utf8");
+            const driverPath = resolve(probeDir, "driver.ts");
+            const driverBody = [
+                "/* Auto-generated by scripts/verify-task.mjs for Todo 10 */",
+                "import { formatDiagnostic } from './safeDiagnostic';",
+                "const fixtureEvent = " + JSON.stringify(fixture.event) + ";",
+                "try {",
+                "  // eslint-disable-next-line @typescript-eslint/no-explicit-any",
+                "  formatDiagnostic(fixtureEvent as any);",
+                "  console.log('PROBE_OK');",
+                "} catch (err: any) {",
+                "  const code = (err && err.code) || 'PROBE_ERROR';",
+                "  console.log('PROBE_FAIL:' + code);",
+                "  process.exitCode = 1;",
+                "}",
+            ].join("\n");
+            await writeFile(driverPath, driverBody, "utf8");
+            const tscRun = spawnSync(
+              process.execPath,
+              [
+                resolve(process.cwd(), "node_modules/typescript/bin/tsc"),
+                "--target",
+                "es2020",
+                "--module",
+                "commonjs",
+                "--moduleResolution",
+                "node",
+                "--esModuleInterop",
+                "--skipLibCheck",
+                "--noEmitOnError",
+                "false",
+                "--outDir",
+                probeDir,
+                safeMirrorAbs,
+                driverPath,
+              ],
+              { cwd: process.cwd(), encoding: "utf8" },
+            );
+            const driverJs = resolve(probeDir, "driver.js");
+            const run = spawnSync(process.execPath, [driverJs], {
+              cwd: process.cwd(),
+              encoding: "utf8",
+            });
+            // Best-effort cleanup of the probe directory. We don't fail
+            // the gate on cleanup errors because the gate's correctness
+            // is determined by the spawnSync results above.
+            try { await rm(probeDir, { recursive: true, force: true }); } catch { /* noop */ }
+            const stdout = (run.stdout ?? "").trim();
+            // The driver sets process.exitCode = 1 when formatDiagnostic
+            // throws, so a non-zero status is expected for negative
+            // fixtures. Inspect stdout FIRST to recover the failure code
+            // before falling back to FIXTURE_INVALID.
+            if (stdout.startsWith("PROBE_FAIL:")) {
+              failureCode = stdout.slice("PROBE_FAIL:".length);
+            } else if (stdout === "PROBE_OK") {
+              if (run.status !== 0) {
+                failureCode = "FIXTURE_INVALID";
+              } else {
+                tsProbeOk = true;
+              }
+            } else {
+              failureCode = "FIXTURE_INVALID";
+            }
+            // Suppress tscRun errors in the validator's stdout; they are
+            // advisory because the driver is auto-generated.
+            void tscRun;
+          } catch {
+            failureCode = "MISSING_FORMATTER";
+          }
+        }
+
+        // (e) Wiring gate: every wiring site must contain at least one
+        //     safeDiagnostic() call AND must NOT contain any console.error(
+        //     inline raw-error printing. The plan body documents these
+        //     checks as `git grep` invocations; we mirror the same regex
+        //     semantics in Node so the gate is portable across shells
+        //     (the Windows quoting rules strip a single backslash before
+        //     git ever sees the regex, which makes the literal approach
+        //     unreliable).
+        if (!failureCode) {
+          const safeSites = [];
+          const consoleLines = [];
+          for (const site of WIRING_SITES) {
+            const source = (await fileExists(site))
+              ? await readFile(resolve(process.cwd(), site), "utf8")
+              : "";
+            const lines = source.split("\n");
+            const consoleErrorPattern = /\bconsole\.error\(/;
+            const consolePattern = /(^|[^/])\bconsole\./;
+            const safeDiagPattern = /safeDiagnostic\(/;
+            for (let i = 0; i < lines.length; i += 1) {
+              const line = lines[i];
+              // Skip line comments entirely so a JSDoc mention of
+              // "console" doesn't false-trigger the gate. Block comments
+              // are not stripped here; they are rare in wiring sites.
+              const trimmed = line.trim();
+              if (trimmed.startsWith("//") || trimmed.startsWith("*")) {
+                continue;
+              }
+              if (consoleErrorPattern.test(line)) {
+                failureCode = "NOT_WIRED";
+                break;
+              }
+              if (safeDiagPattern.test(line)) {
+                safeSites.push({ file: site, lineNo: i + 1 });
+              }
+              if (consolePattern.test(line)) {
+                consoleLines.push({ file: site, lineNo: i + 1 });
+              }
+            }
+            if (failureCode) break;
+          }
+          if (!failureCode && safeSites.length === 0) {
+            failureCode = "NOT_WIRED";
+          }
+          if (!failureCode) {
+            for (const cl of consoleLines) {
+              const hasNearby = safeSites.some(
+                (sl) => sl.file === cl.file && Math.abs(sl.lineNo - cl.lineNo) <= 2
+              );
+              if (!hasNearby) {
+                failureCode = "NOT_WIRED";
+                break;
+              }
+            }
+          }
+        }
+
+        // (f) For the `valid` fixture case the probe must have produced
+        //     PROBE_OK. For all other cases the failure code was already
+        //     captured in (d).
+        if (!failureCode) {
+          if (fixture.case === "valid" && !tsProbeOk) {
+            failureCode = "FIXTURE_INVALID";
+          }
+        }
+
+        if (failureCode) {
+          console.log(`LOGGING NOT READY: ${failureCode}`);
+          process.exitCode = 1;
+        } else {
+          console.log("LOGGING READY");
+        }
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

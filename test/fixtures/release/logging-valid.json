@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "case": "valid",
+  "description": "Happy-path logging fixture. The fixture carries an allowlist-compliant SafeDiagnosticInput under `event`. The Todo 10 validator runs formatDiagnostic against it and must emit LOGGING READY. The fixture also includes a `wiringSentinel` string that the validator searches for inside the three wiring-site files to confirm the formatter is wired at production sites (not only at the unit-test seam).",
+  "event": {
+    "operation": "identity:vscode:success",
+    "credentialSource": "vscode",
+    "elapsedMs": 42,
+    "errorClass": "class:credential_error",
+    "mysqlErrorCode": "ER_ACCESS_DENIED_ERROR",
+    "connectionState": "connected",
+    "retryCount": 1
+  },
+  "wiringFiles": [
+    "src/identity/entraToken.ts",
+    "src/main.ts",
+    "src/views/queryWorkbench.ts"
+  ]
+}

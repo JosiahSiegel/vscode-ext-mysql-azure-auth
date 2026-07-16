@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "case": "email-leak",
+  "description": "Negative logging fixture. The fixture's `event.errorClass` carries a literal <user@host> substring. The Todo 10 validator runs formatDiagnostic against it and must emit LOGGING NOT READY: EMAIL_LEAK with exit 1. Principal emails (Entra UPNs) are never permitted in release evidence.",
+  "event": {
+    "operation": "identity:vscode:failure",
+    "credentialSource": "vscode",
+    "errorClass": "wrapped <someone@contoso.com> principal"
+  }
+}

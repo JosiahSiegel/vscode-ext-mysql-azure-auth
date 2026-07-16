@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "case": "unknown-field",
+  "description": "Negative logging fixture. The fixture's `event` carries an extra field `secret` that is outside the canonical 7-key allowlist. The Todo 10 validator runs formatDiagnostic against it and must emit LOGGING NOT READY: UNKNOWN_FIELD with exit 1. Locks in the rule that ONLY the seven allowlisted keys may be emitted.",
+  "event": {
+    "operation": "identity:trace",
+    "credentialSource": "vscode",
+    "secret": "shhh-this-is-not-allowed"
+  }
+}

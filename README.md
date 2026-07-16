@@ -194,6 +194,34 @@ npm run package           # produce .vsix
 
 See `BUILD.md` for troubleshooting tips and pre-publish checks.
 
+### Distribution
+
+The extension ships as a `.vsix` and is currently distributed via **GitHub
+Releases** under the `JosiahSiegel` publisher namespace. There is no
+VS Code Marketplace listing yet — that path requires Azure live + pilot
+attestations which the maintainer has not yet collected.
+
+**Install the community preview:**
+
+1. Open the [Releases page](https://github.com/JosiahSiegel/vscode-ext-mysql-azure-auth/releases).
+2. Download the latest `mysql-azure-auth-0.1.0-preview.vsix` (or a
+   matching tag) and its `.sha256` companion.
+3. In VS Code: **Extensions** panel → `⋯` menu → **Install from VSIX…** →
+   pick the downloaded file.
+4. Verify the SHA-256 of the VSIX against the published `.sha256` file
+   before installing.
+5. Reload VS Code when prompted.
+
+**Cut a new release:**
+
+```bash
+git tag 0.1.0-preview             # or 0.2.0, etc.
+git push origin 0.1.0-preview     # triggers .github/workflows/release-github.yml
+```
+
+The workflow builds the VSIX, hashes it, and attaches it to a GitHub
+Release marked as pre-release. No manual upload step is required.
+
 ---
 
 ## Customization points

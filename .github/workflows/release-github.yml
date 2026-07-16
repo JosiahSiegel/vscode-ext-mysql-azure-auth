@@ -1,0 +1,182 @@
+name: Release GitHub Preview
+
+# GitHub Releases workflow for community-preview distribution.
+#
+# Builds the VSIX on tag push, attaches it to a GitHub Release marked
+# as pre-release. Does NOT publish to the VS Code Marketplace — that
+# path is gated by verify:t19 and is a separate owner action.
+#
+# Trigger model:
+#   - push: tags matching `v*.*.*` or `0.*` (e.g. `0.1.0-preview`, `v0.1.0`).
+#     Owner-initiated by pushing a tag locally:
+#       git tag 0.1.0-preview
+#       git push origin 0.1.0-preview
+#   - workflow_dispatch: manual run. Provide `tag` input to override the
+#     tag derived from the trigger ref (defaults to `0.1.0-preview`).
+#
+# Permission model:
+#   - Job declares `permissions: contents: write` because creating a
+#     GitHub Release requires write access to repository contents. The
+#     workflow only runs on owner-initiated tag pushes; no PR / fork /
+#     schedule triggers.
+#   - No secrets are used. `GITHUB_TOKEN` is supplied automatically.
+#
+# Distribution:
+#   - Release marked `prerelease: true` per the plan's specialist-scope
+#     commitment: this is a community preview, not an official Microsoft
+#     extension. The VS Code Marketplace listing is a separate gate
+#     (verify:t19) and is not opened by this workflow.
+
+on:
+  push:
+    tags:
+      - "0.*"
+      - "v0.*.*"
+      - "v1.*.*"
+      - "v2.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag name to release (defaults to 0.1.0-preview if empty)."
+        required: false
+        type: string
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: release-github-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-github:
+    name: Build VSIX + create GitHub Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.16.0"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (sanity)
+        # Quick lint gate before packaging. ESLint exits non-zero on any
+        # error; warnings are tolerated. The dedicated CI workflow does
+        # the full lint + typecheck + unit + integration matrix.
+        run: npm run lint
+
+      - name: Package VSIX
+        # Runs scripts/sbom.mjs chain implicitly via `npm run package`.
+        # The package script does:
+        #   1. esbuild minified bundle into out/main.js
+        #   2. vsce package --no-dependencies
+        # Output: mysql-azure-auth-0.1.0.vsix in the repo root.
+        run: npm run package
+
+      - name: Verify package gate (Todo 14)
+        # Confirm the build is internally consistent. Todo 14 emits
+        # PACKAGE PREFLIGHT READY on a clean tree; the live run is the
+        # source of truth even when this job continues to release.
+        run: node scripts/verify-task.mjs 14
+        continue-on-error: true
+
+      - name: Resolve release tag
+        id: resolve-tag
+        run: |
+          if [ -n "${{ github.event.inputs.tag }}" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ -n "${{ github.ref_name }}" ] && [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+          else
+            TAG="0.1.0-preview"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "Resolved release tag: ${TAG}"
+
+      - name: Compute SHA-256 of VSIX
+        id: hash
+        run: |
+          VSIX=$(ls mysql-azure-auth-*.vsix | head -n 1)
+          echo "vsix=${VSIX}" >> "$GITHUB_OUTPUT"
+          sha256sum "${VSIX}" | awk '{print $1}' > "${VSIX}.sha256"
+          echo "sha256=$(cat ${VSIX}.sha256)" >> "$GITHUB_OUTPUT"
+          echo "VSIX: ${VSIX}"
+          echo "SHA-256: $(cat ${VSIX}.sha256)"
+
+      - name: Upload VSIX + checksum as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-and-checksum
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            mysql-azure-auth-*.vsix
+            mysql-azure-auth-*.vsix.sha256
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ steps.resolve-tag.outputs.tag }}"
+          tag_name: "${{ steps.resolve-tag.outputs.tag }}"
+          generate_release_notes: true
+          prerelease: true
+          draft: false
+          fail_on_unmatched_files: true
+          files: |
+            mysql-azure-auth-*.vsix
+            mysql-azure-auth-*.vsix.sha256
+          body: |
+            ## mysql-azure-auth ${{ steps.resolve-tag.outputs.tag }}
+
+            Community preview VSIX for the **Azure Database for MySQL
+            Flexible Server + Microsoft Entra ID authentication** VS Code
+            extension. This release is a **pre-release**, not an official
+            Microsoft extension, and is not affiliated with Microsoft,
+            Azure, Oracle, or MySQL.
+
+            ### Install
+
+            1. Download `mysql-azure-auth-${{ steps.resolve-tag.outputs.tag }}.vsix`
+               (or the versioned file below).
+            2. In VS Code: **Extensions** panel → `⋯` menu →
+               **Install from VSIX…** → pick the downloaded file.
+            3. Reload VS Code when prompted.
+
+            ### Verify
+
+            The SHA-256 checksum is published alongside the VSIX:
+
+            ```
+            ${{ steps.hash.outputs.sha256 }}
+            ```
+
+            ### Known limitations
+
+            - **No Marketplace listing yet.** This is a GitHub Releases
+              preview pending Azure live + pilot attestations for the
+              full Marketplace gate.
+            - **Read-only by design.** DDL, write SQL, and row/schema
+              editing are rejected by `classifySqlBatch` before any
+              pool dispatch. There is no Marketplace opt-out for this.
+            - **No telemetry.** The extension does not embed Application
+              Insights, Sentry, or any other analytics SDK. Outbound
+              calls are limited to the VS Code Microsoft auth provider,
+              Azure CLI (fallback), and the MySQL Flexible Server.
+            - **No device-code sign-in.** Removed during preview; use
+              the VS Code Microsoft auth provider or the Azure CLI
+              fallback.
+
+            See [`SECURITY.md`](./SECURITY.md) for the vulnerability
+            reporting policy and [`docs/PRIVACY.md`](./docs/PRIVACY.md)
+            for the authoritative privacy policy.

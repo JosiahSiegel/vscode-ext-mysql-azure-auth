@@ -7,6 +7,11 @@ name: Release Preview
 # current commit so the owner can confirm a clean dry-run before any
 # real distribution step is taken manually.
 #
+# For actual community-preview distribution (GitHub Releases with the
+# .vsix attached), use .github/workflows/release-github.yml. That
+# workflow is triggered by owner-initiated tag pushes (e.g. `git push
+# origin 0.1.0-preview`) and creates a pre-release on the public repo.
+#
 # Trigger model:
 #   - workflow_dispatch: manual, owner-initiated run only.
 #     No `push:` / `pull_request:` / `schedule:` / external triggers.

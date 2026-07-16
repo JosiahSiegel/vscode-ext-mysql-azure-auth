@@ -4182,6 +4182,531 @@ if (!invokedDirectly) {
     // mirrors the deterministic not-met branch.
     emitInputUnavailable([]);
   }
+} else if (task === "18") {
+  /* Todo 18 - optional direct-pilot evidence gate.
+   *
+   * Reads `.omo/inputs/pilot/*.json` records and
+   * `.omo/inputs/pilot-attestations/<attemptId>.json` +
+   * `.omo/inputs/pilot-attestations/<attemptId>.receipt.txt`.
+   * Both directories are optional owner-controlled external inputs;
+   * absence yields the deterministic PILOT GATE NOT MET branch
+   * (missing=missing-input: ...) that the plan body accepts as
+   * a valid task completion. Pilot evidence MUST NEVER be
+   * fabricated.
+   *
+   * Fixture mode (--fixture <path>) carries records /
+   * attestations / receiptText inline; receipts are SHA-256 hashed
+   * in-memory exactly as live mode would hash on-disk bytes.
+   * No live `.omo/inputs/pilot*` directory is read or written.
+   *
+   * Machine results (stdout):
+   *   PILOT GATE PASS                  exit 0
+   *   PILOT GATE NOT MET               exit 1  (NOT MET branches share stdout
+   *                                                   and distinguish on stderr
+   *                                                   via `missing=<reason>`)
+   *   PILOT GATE FAIL: PII_EXPOSURE    exit 1  (privacy violation)
+   */
+  const PILOT_RECORDS_DIR = ".omo/inputs/pilot";
+  const PILOT_ATTESTATIONS_DIR = ".omo/inputs/pilot-attestations";
+
+  // Schema enums.
+  const PILOT_KNOWN_DEFECT_CLASSES = new Set([
+    "token-exposure", "data-loss", "privilege-escalation", "other",
+  ]);
+  const PILOT_KNOWN_OS = new Set(["windows", "macos", "linux"]);
+  const PILOT_KNOWN_AUTH_SOURCES = new Set(["vscode", "azure-cli"]);
+
+  // Privacy-shaped regexes (PII / raw SQL DDL/DML).
+  const PILOT_EMAIL_REGEX =
+    /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/u;
+  const PILOT_BEARER_REGEX =
+    /\bBearer\s+[A-Za-z0-9._~+/=-]{12,}/u;
+  const PILOT_SQL_DDL_REGEX =
+    /\b(?:SELECT\b.+\bFROM|INSERT\s+INTO|UPDATE\b.+\bSET|DELETE\s+FROM|CREATE\s+(?:TABLE|DATABASE|USER|INDEX)|ALTER\s+(?:TABLE|DATABASE|USER|INDEX)|DROP\s+(?:TABLE|DATABASE|USER|INDEX)|TRUNCATE\s+TABLE|GRANT\b.+\bON|REVOKE\b.+\bON)\b/iu;
+
+  function pilotIsPlainObject(value) {
+    return (
+      value !== null && typeof value === "object" && !Array.isArray(value)
+    );
+  }
+  function pilotIsIso8601Utc(value) {
+    if (typeof value !== "string" || value.length === 0) return false;
+    const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
+    if (!iso.test(value)) return false;
+    return !Number.isNaN(Date.parse(value));
+  }
+  function pilotIsLowerHex64(value) {
+    return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+  }
+
+  function emitPilotPass() {
+    console.log("PILOT GATE PASS");
+  }
+  function emitPilotNotMet(reason) {
+    console.log("PILOT GATE NOT MET");
+    if (typeof reason === "string" && reason.length > 0) {
+      console.error(`missing=${reason}`);
+    }
+    process.exitCode = 1;
+  }
+  function emitPilotFail(code) {
+    console.log(`PILOT GATE FAIL: ${code}`);
+    process.exitCode = 1;
+  }
+
+  /** Validate one pilot record against the strict closed schema. */
+  function validatePilotRecord(raw, index) {
+    if (!pilotIsPlainObject(raw)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}]:not-object` };
+    }
+    const allowedTop = new Set([
+      "schemaVersion", "participantId", "qualifiedTarget",
+      "maintainerOrContributor", "candidateVersion", "candidateSha256",
+      "attemptId", "startedAt", "completedAt", "os", "vscodeVersion",
+      "authSource", "outcomes", "defects",
+    ]);
+    for (const key of Object.keys(raw)) {
+      if (!allowedTop.has(key)) {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].${key}` };
+      }
+    }
+    if (raw.schemaVersion !== 1) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].schemaVersion` };
+    }
+    if (typeof raw.participantId !== "string" ||
+        !/^p_[a-f0-9]{16}$/.test(raw.participantId)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].participantId` };
+    }
+    if (typeof raw.qualifiedTarget !== "boolean" ||
+        raw.qualifiedTarget !== true) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].qualifiedTarget` };
+    }
+    if (raw.maintainerOrContributor !== false) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].maintainerOrContributor` };
+    }
+    if (typeof raw.candidateVersion !== "string" || raw.candidateVersion.length === 0) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].candidateVersion` };
+    }
+    if (!pilotIsLowerHex64(raw.candidateSha256)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].candidateSha256` };
+    }
+    if (typeof raw.attemptId !== "string" ||
+        !/^a_[a-f0-9]{16}$/.test(raw.attemptId)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].attemptId` };
+    }
+    if (!pilotIsIso8601Utc(raw.startedAt)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].startedAt` };
+    }
+    if (!pilotIsIso8601Utc(raw.completedAt)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].completedAt` };
+    }
+    if (Date.parse(raw.completedAt) < Date.parse(raw.startedAt)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].completedAt<startedAt` };
+    }
+    if (typeof raw.os !== "string" || !PILOT_KNOWN_OS.has(raw.os)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].os` };
+    }
+    if (typeof raw.vscodeVersion !== "string" || raw.vscodeVersion.length === 0) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].vscodeVersion` };
+    }
+    if (typeof raw.authSource !== "string" ||
+        !PILOT_KNOWN_AUTH_SOURCES.has(raw.authSource)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].authSource` };
+    }
+    const outcomes = raw.outcomes;
+    if (!pilotIsPlainObject(outcomes)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].outcomes` };
+    }
+    const allowedOutcomes = new Set([
+      "installed", "authenticated", "connected", "browsedSchema", "selectOne",
+    ]);
+    for (const key of Object.keys(outcomes)) {
+      if (!allowedOutcomes.has(key)) {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].outcomes.${key}` };
+      }
+    }
+    for (const key of allowedOutcomes) {
+      if (typeof outcomes[key] !== "boolean") {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].outcomes.${key}` };
+      }
+    }
+    if (!Array.isArray(raw.defects)) {
+      return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].defects` };
+    }
+    for (let d = 0; d < raw.defects.length; d += 1) {
+      const defect = raw.defects[d];
+      if (!pilotIsPlainObject(defect)) {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].defects[${d}]` };
+      }
+      if (typeof defect.class !== "string" ||
+          !PILOT_KNOWN_DEFECT_CLASSES.has(defect.class)) {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].defects[${d}].class` };
+      }
+      if (typeof defect.resolved !== "boolean") {
+        return { ok: false, code: "SCHEMA_INVALID", field: `[${index}].defects[${d}].resolved` };
+      }
+    }
+    return { ok: true, record: raw };
+  }
+
+  /** Validate one attestation against the strict closed schema. */
+  function validateAttestation(raw) {
+    if (!pilotIsPlainObject(raw)) return { ok: false, code: "SCHEMA_INVALID" };
+    const allowed = new Set([
+      "attemptId", "participantId", "candidateSha256", "receiptPath",
+      "attestedDistinctParticipant", "qualifiedTarget", "attestedAt",
+      "intakeBatchId", "ownerArtifactSha256",
+    ]);
+    for (const key of Object.keys(raw)) {
+      if (!allowed.has(key)) {
+        return { ok: false, code: "SCHEMA_INVALID" };
+      }
+    }
+    if (typeof raw.attemptId !== "string" ||
+        !/^a_[a-f0-9]{16}$/.test(raw.attemptId)) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (typeof raw.participantId !== "string" ||
+        !/^p_[a-f0-9]{16}$/.test(raw.participantId)) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (!pilotIsLowerHex64(raw.candidateSha256)) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (typeof raw.receiptPath !== "string" || raw.receiptPath.length === 0) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (raw.attestedDistinctParticipant !== true) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (raw.qualifiedTarget !== true) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (!pilotIsIso8601Utc(raw.attestedAt)) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (typeof raw.intakeBatchId !== "string" || raw.intakeBatchId.length === 0) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    if (!pilotIsLowerHex64(raw.ownerArtifactSha256)) {
+      return { ok: false, code: "SCHEMA_INVALID" };
+    }
+    return { ok: true, attestation: raw };
+  }
+
+  /** True if `text` carries privacy-shaped content or a raw SQL DDL/DML. */
+  function textHasPii(text) {
+    if (typeof text !== "string" || text.length === 0) return false;
+    if (PILOT_EMAIL_REGEX.test(text)) return true;
+    if (PILOT_BEARER_REGEX.test(text)) return true;
+    if (PILOT_SQL_DDL_REGEX.test(text)) return true;
+    return false;
+  }
+
+  /**
+   * Evaluate records + inline attestations. Never touches the live
+   * `.omo/inputs/pilot*` directories. Returns:
+   *   { ok: true, evidence }                    on PASS
+   *   { ok: false, code: "PII_EXPOSURE" }       when PII/SQL/Bearer is present
+   *   { ok: false, code: "NOT_MET", reason }    on any NOT MET branch
+   */
+  function evaluatePilotBatch(records, attestations) {
+    // (1) Per-record schema.
+    for (let i = 0; i < records.length; i += 1) {
+      const v = validatePilotRecord(records[i], i);
+      if (!v.ok) return { ok: false, code: "NOT_MET", reason: "schema-invalid" };
+      if (textHasPii(JSON.stringify(records[i]))) {
+        return { ok: false, code: "PII_EXPOSURE" };
+      }
+    }
+
+    // (2) Per-attempt attestation + receipt.
+    for (const record of records) {
+      const entry = attestations.get(record.attemptId);
+      if (!entry) return { ok: false, code: "NOT_MET", reason: "attestation-missing" };
+      const a = entry.attestation;
+      const att = validateAttestation(a);
+      if (!att.ok) return { ok: false, code: "NOT_MET", reason: "attestation-schema-invalid" };
+      if (a.attemptId !== record.attemptId) {
+        return { ok: false, code: "NOT_MET", reason: "attestation-missing:attemptId-mismatch" };
+      }
+      if (a.participantId !== record.participantId) {
+        return { ok: false, code: "NOT_MET", reason: "attestation-missing:participantId-mismatch" };
+      }
+      if (a.candidateSha256 !== record.candidateSha256) {
+        return { ok: false, code: "NOT_MET", reason: "attestation-missing:candidateSha256-mismatch" };
+      }
+      const computed = createHash("sha256")
+        .update(Buffer.from(entry.receiptText, "utf8"))
+        .digest("hex")
+        .toLowerCase();
+      if (computed !== a.ownerArtifactSha256.toLowerCase()) {
+        return { ok: false, code: "NOT_MET", reason: "attestation-hash-mismatch" };
+      }
+      // (a) Receipt must not carry PII / raw SQL.
+      if (textHasPii(entry.receiptText)) {
+        return { ok: false, code: "PII_EXPOSURE" };
+      }
+      // (b) Attestation string fields must not carry PII either.
+      for (const k of Object.keys(a)) {
+        if (typeof a[k] === "string" && textHasPii(a[k])) {
+          return { ok: false, code: "PII_EXPOSURE" };
+        }
+      }
+    }
+
+    // (3) Duplicate attemptId.
+    const attemptIds = new Set();
+    for (const record of records) {
+      if (attemptIds.has(record.attemptId)) {
+        return { ok: false, code: "NOT_MET", reason: "duplicate-attempt-id" };
+      }
+      attemptIds.add(record.attemptId);
+    }
+
+    // (4) Duplicate intakeBatchId (duplicate batch evidence).
+    const batchIds = new Map();
+    for (const record of records) {
+      const entry = attestations.get(record.attemptId);
+      const bid = entry.attestation.intakeBatchId;
+      if (batchIds.has(bid)) {
+        return { ok: false, code: "NOT_MET", reason: "duplicate-batch-id" };
+      }
+      batchIds.set(bid, record.attemptId);
+    }
+
+    // (5) Participant-vs-identity consistency.
+    const participantIdentity = new Map();
+    for (const record of records) {
+      const prior = participantIdentity.get(record.participantId);
+      const here = {
+        candidateSha256: record.candidateSha256,
+        candidateVersion: record.candidateVersion,
+      };
+      if (prior) {
+        if (prior.candidateSha256 !== here.candidateSha256 ||
+            prior.candidateVersion !== here.candidateVersion) {
+          return {
+            ok: false,
+            code: "NOT_MET",
+            reason: "participant-multi-identity",
+          };
+        }
+      } else {
+        participantIdentity.set(record.participantId, here);
+      }
+    }
+
+    // (6) Unresolved defects. `token-exposure` is PII -> FAIL:PII_EXPOSURE.
+    //     `data-loss` / `privilege-escalation` / `other` -> NOT_MET defect-unresolved.
+    for (const record of records) {
+      for (const defect of record.defects) {
+        if (defect.resolved === false) {
+          if (defect.class === "token-exposure") {
+            return { ok: false, code: "PII_EXPOSURE" };
+          }
+          return {
+            ok: false,
+            code: "NOT_MET",
+            reason: "defect-unresolved:" + defect.class,
+          };
+        }
+      }
+    }
+
+    // (7) Participation-count gate:
+    //     >=3 distinct participants
+    //     >=2 with at least one outcomes.selectOne:true
+    //     >=2 distinct participants each with >=2 attemptIds separated by >=24h.
+    const byParticipant = new Map();
+    for (const record of records) {
+      const list = byParticipant.get(record.participantId) ?? [];
+      list.push(record);
+      byParticipant.set(record.participantId, list);
+    }
+    if (byParticipant.size < 3) {
+      return { ok: false, code: "NOT_MET", reason: "too-few-distinct-participants" };
+    }
+    let withSelectOne = 0;
+    for (const list of byParticipant.values()) {
+      if (list.some((r) => r.outcomes.selectOne === true)) withSelectOne += 1;
+    }
+    if (withSelectOne < 2) {
+      return { ok: false, code: "NOT_MET", reason: "too-few-distinct-participants" };
+    }
+    let repeated = 0;
+    for (const list of byParticipant.values()) {
+      if (list.length < 2) continue;
+      const stamps = list
+        .map((r) => Date.parse(r.startedAt))
+        .sort((a, b) => a - b);
+      const earliest = stamps[0];
+      const later = stamps.find((t) => t >= earliest + 24 * 60 * 60 * 1000);
+      if (later) repeated += 1;
+    }
+    if (repeated < 2) {
+      return { ok: false, code: "NOT_MET", reason: "insufficient-repeats" };
+    }
+    return {
+      ok: true,
+      evidence: {
+        recordCount: records.length,
+        participants: byParticipant.size,
+        withSelectOne,
+        repeated,
+      },
+    };
+  }
+
+  // ---- mode dispatch ----
+  const fixtureFlag = process.argv.indexOf("--fixture");
+  const fixturePath =
+    fixtureFlag === -1 ? process.argv[3] : process.argv[fixtureFlag + 1];
+  const liveMode = !fixturePath;
+
+  if (liveMode) {
+    // Live mode: directory absent OR zero .json files
+    // -> PILOT GATE NOT MET missing=missing-input: ...
+    let entries = null;
+    try {
+      entries = await readdir(PILOT_RECORDS_DIR, { withFileTypes: true });
+    } catch {
+      entries = null;
+    }
+    if (entries === null) {
+      emitPilotNotMet(
+        `missing-input: ${PILOT_RECORDS_DIR}|missing-input: ` +
+        `${PILOT_ATTESTATIONS_DIR}/<attemptId>.json|missing-input: ` +
+        `${PILOT_ATTESTATIONS_DIR}/<attemptId>.receipt.txt`,
+      );
+    } else {
+      const recordFiles = entries.filter(
+        (e) => e.isFile() && e.name.endsWith(".json"),
+      );
+      if (recordFiles.length === 0) {
+        emitPilotNotMet(
+          `missing-input: ${PILOT_RECORDS_DIR}/*.json|missing-input: ` +
+          `${PILOT_ATTESTATIONS_DIR}/<attemptId>.json|missing-input: ` +
+          `${PILOT_ATTESTATIONS_DIR}/<attemptId>.receipt.txt`,
+        );
+      } else {
+        const records = [];
+        let parseError = false;
+        for (const entry of recordFiles) {
+          try {
+            const raw = await readFile(
+              resolve(PILOT_RECORDS_DIR, entry.name),
+              "utf8",
+            );
+            records.push(JSON.parse(raw));
+          } catch {
+            parseError = true;
+            break;
+          }
+        }
+        if (parseError) {
+          emitPilotNotMet("live-record-unparseable");
+        } else {
+          const attestations = new Map();
+          let stop = false;
+          for (const record of records) {
+            if (!pilotIsPlainObject(record) ||
+                typeof record.attemptId !== "string") {
+              stop = true;
+              emitPilotNotMet("live-record-malformed");
+              break;
+            }
+            const attemptId = record.attemptId;
+            try {
+              const attRaw = await readFile(
+                resolve(PILOT_ATTESTATIONS_DIR, `${attemptId}.json`),
+                "utf8",
+              );
+              const receiptRaw = await readFile(
+                resolve(PILOT_ATTESTATIONS_DIR, `${attemptId}.receipt.txt`),
+                "utf8",
+              );
+              attestations.set(attemptId, {
+                attestation: JSON.parse(attRaw),
+                receiptText: receiptRaw,
+              });
+            } catch {
+              stop = true;
+              emitPilotNotMet("attestation-missing:" + attemptId);
+              break;
+            }
+          }
+          if (!stop) {
+            const verdict = evaluatePilotBatch(records, attestations);
+            if (verdict.ok) {
+              emitPilotPass();
+            } else if (verdict.code === "PII_EXPOSURE") {
+              emitPilotFail("PII_EXPOSURE");
+            } else {
+              emitPilotNotMet(verdict.reason);
+            }
+          }
+        }
+      }
+    }
+  } else {
+    // Fixture mode.
+    let fixture = null;
+    let parseFailed = false;
+    try {
+      const raw = await readFile(
+        resolve(process.cwd(), fixturePath),
+        "utf8",
+      );
+      fixture = JSON.parse(raw);
+    } catch {
+      parseFailed = true;
+    }
+    if (parseFailed) {
+      emitPilotNotMet("fixture-invalid");
+    } else if (!pilotIsPlainObject(fixture)) {
+      emitPilotNotMet("fixture-invalid");
+    } else if (
+      Object.keys(fixture).length === 0 ||
+      fixture.inputUnavailable === true
+    ) {
+      emitPilotNotMet("missing-input: pilot-records");
+    } else if (!Array.isArray(fixture.records)) {
+      emitPilotNotMet("fixture-invalid");
+    } else if (!pilotIsPlainObject(fixture.attestations)) {
+      emitPilotNotMet("fixture-invalid");
+    } else {
+      const attestations = new Map();
+      let malformed = false;
+      for (const attemptId of Object.keys(fixture.attestations)) {
+        const entry = fixture.attestations[attemptId];
+        if (
+          !pilotIsPlainObject(entry) ||
+          !pilotIsPlainObject(entry.attestation) ||
+          typeof entry.receiptText !== "string"
+        ) {
+          malformed = true;
+          break;
+        }
+        attestations.set(attemptId, {
+          attestation: entry.attestation,
+          receiptText: entry.receiptText,
+        });
+      }
+      if (malformed) {
+        emitPilotNotMet("fixture-invalid");
+      } else {
+        const verdict = evaluatePilotBatch(fixture.records, attestations);
+        if (verdict.ok) {
+          emitPilotPass();
+        } else if (verdict.code === "PII_EXPOSURE") {
+          emitPilotFail("PII_EXPOSURE");
+        } else {
+          emitPilotNotMet(verdict.reason);
+        }
+      }
+    }
+  }
 } else {
   console.error("BASELINE NOT READY: TASK_UNSUPPORTED");
   process.exitCode = 1;

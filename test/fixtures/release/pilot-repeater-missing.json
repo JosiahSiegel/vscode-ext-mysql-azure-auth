@@ -1,0 +1,186 @@
+{
+  "records": [
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_0000000000000015",
+      "startedAt": "2026-03-01T09:00:00Z",
+      "completedAt": "2026-03-01T09:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_0000000000000016",
+      "startedAt": "2026-03-02T10:00:00Z",
+      "completedAt": "2026-03-02T10:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000002",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_0000000000000017",
+      "startedAt": "2026-03-03T09:00:00Z",
+      "completedAt": "2026-03-03T09:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000002",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_0000000000000018",
+      "startedAt": "2026-03-03T10:00:00Z",
+      "completedAt": "2026-03-03T10:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000003",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_0000000000000019",
+      "startedAt": "2026-03-04T09:00:00Z",
+      "completedAt": "2026-03-04T09:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    }
+  ],
+  "attestations": {
+    "a_0000000000000015": {
+      "attestation": {
+        "attemptId": "a_0000000000000015",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_0000000000000015.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-03-01T09:00:30Z",
+        "intakeBatchId": "synthetic-batch-01",
+        "ownerArtifactSha256": "3d5d9cfda4e49de408bb506049fa81aab0e716c18439c0431422773bd2b4ac08"
+      },
+      "receiptText": "synthetic pilot receipt a_0000000000000015 participant p_0000000000000001 batch 1\n"
+    },
+    "a_0000000000000016": {
+      "attestation": {
+        "attemptId": "a_0000000000000016",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_0000000000000016.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-03-02T10:00:30Z",
+        "intakeBatchId": "synthetic-batch-02",
+        "ownerArtifactSha256": "13645ebe961129c0a44ccb2aeb0a74d5e93d3125a2608bfe9e52cba1c217396e"
+      },
+      "receiptText": "synthetic pilot receipt a_0000000000000016 participant p_0000000000000001 batch 2\n"
+    },
+    "a_0000000000000017": {
+      "attestation": {
+        "attemptId": "a_0000000000000017",
+        "participantId": "p_0000000000000002",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_0000000000000017.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-03-03T09:00:30Z",
+        "intakeBatchId": "synthetic-batch-03",
+        "ownerArtifactSha256": "dc0a1e59bd4cf41cfd3fecbe945bf2528c331f3fab59a2b94c94e3ec9ddb6800"
+      },
+      "receiptText": "synthetic pilot receipt a_0000000000000017 participant p_0000000000000002 batch 3\n"
+    },
+    "a_0000000000000018": {
+      "attestation": {
+        "attemptId": "a_0000000000000018",
+        "participantId": "p_0000000000000002",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_0000000000000018.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-03-03T10:00:30Z",
+        "intakeBatchId": "synthetic-batch-04",
+        "ownerArtifactSha256": "d3a8f9915b4e085f2f880e988d02c402d03c76fa869f092b6d31942662ff0598"
+      },
+      "receiptText": "synthetic pilot receipt a_0000000000000018 participant p_0000000000000002 batch 4\n"
+    },
+    "a_0000000000000019": {
+      "attestation": {
+        "attemptId": "a_0000000000000019",
+        "participantId": "p_0000000000000003",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_0000000000000019.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-03-04T09:00:30Z",
+        "intakeBatchId": "synthetic-batch-05",
+        "ownerArtifactSha256": "4bce0467178ac6780739f37821c13d1113ad1b642210a76df50cc70a92ff8333"
+      },
+      "receiptText": "synthetic pilot receipt a_0000000000000019 participant p_0000000000000003 batch 5\n"
+    }
+  }
+}

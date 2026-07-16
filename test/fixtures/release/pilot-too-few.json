@@ -1,0 +1,114 @@
+{
+  "records": [
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_000000000000000b",
+      "startedAt": "2026-02-01T09:00:00Z",
+      "completedAt": "2026-02-01T09:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_000000000000000c",
+      "startedAt": "2026-02-02T10:00:00Z",
+      "completedAt": "2026-02-02T10:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    },
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_000000000000000d",
+      "startedAt": "2026-02-03T11:00:00Z",
+      "completedAt": "2026-02-03T11:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": []
+    }
+  ],
+  "attestations": {
+    "a_000000000000000b": {
+      "attestation": {
+        "attemptId": "a_000000000000000b",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_000000000000000b.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-02-01T09:00:30Z",
+        "intakeBatchId": "synthetic-batch-01",
+        "ownerArtifactSha256": "8e4097862bca7e1bb4376cb5927ccec40721d726ba3973847733e7c1e347e832"
+      },
+      "receiptText": "synthetic pilot receipt a_000000000000000b participant p_0000000000000001 batch 1\n"
+    },
+    "a_000000000000000c": {
+      "attestation": {
+        "attemptId": "a_000000000000000c",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_000000000000000c.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-02-02T10:00:30Z",
+        "intakeBatchId": "synthetic-batch-02",
+        "ownerArtifactSha256": "38172b29f4a00ea38c3bbd833deccdf1714980659f70f36772aebddcc2c9f673"
+      },
+      "receiptText": "synthetic pilot receipt a_000000000000000c participant p_0000000000000001 batch 2\n"
+    },
+    "a_000000000000000d": {
+      "attestation": {
+        "attemptId": "a_000000000000000d",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_000000000000000d.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-02-03T11:00:30Z",
+        "intakeBatchId": "synthetic-batch-03",
+        "ownerArtifactSha256": "07b372a027be39299043b5184f61a2ed7d0ecfbf6d297970ddbc5470e44345dc"
+      },
+      "receiptText": "synthetic pilot receipt a_000000000000000d participant p_0000000000000001 batch 3\n"
+    }
+  }
+}

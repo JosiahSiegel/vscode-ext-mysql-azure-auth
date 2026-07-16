@@ -1,0 +1,47 @@
+{
+  "records": [
+    {
+      "schemaVersion": 1,
+      "participantId": "p_0000000000000001",
+      "qualifiedTarget": true,
+      "maintainerOrContributor": false,
+      "candidateVersion": "0.1.0",
+      "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "attemptId": "a_000000000000001f",
+      "startedAt": "2026-04-01T09:00:00Z",
+      "completedAt": "2026-04-01T09:00:30Z",
+      "os": "windows",
+      "vscodeVersion": "1.85.0",
+      "authSource": "vscode",
+      "outcomes": {
+        "installed": true,
+        "authenticated": true,
+        "connected": true,
+        "browsedSchema": true,
+        "selectOne": true
+      },
+      "defects": [
+        {
+          "class": "token-exposure",
+          "resolved": false
+        }
+      ]
+    }
+  ],
+  "attestations": {
+    "a_000000000000001f": {
+      "attestation": {
+        "attemptId": "a_000000000000001f",
+        "participantId": "p_0000000000000001",
+        "candidateSha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "receiptPath": "a_000000000000001f.receipt.txt",
+        "attestedDistinctParticipant": true,
+        "qualifiedTarget": true,
+        "attestedAt": "2026-04-01T09:00:30Z",
+        "intakeBatchId": "synthetic-batch-01",
+        "ownerArtifactSha256": "17b3aa2425d73fc71678fa5dfec1b8e422c97cd9d5340d96fe0d7f7bf508a427"
+      },
+      "receiptText": "synthetic pilot receipt a_000000000000001f participant p_0000000000000001 batch 1\n"
+    }
+  }
+}

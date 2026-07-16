@@ -1,0 +1,73 @@
+# Dependabot configuration for the mysql-azure-auth preview repository.
+#
+# This file is wired to Todo 13's policy:
+#   - npm ecosystem updates run monthly on day 1.
+#   - GitHub Actions updates run monthly on day 2.
+#   - Float updates (releases that include a new semver caret upgrade) are
+#     allowed but the dev section is conservative: Dependabot opens PRs but
+#     does not auto-merge.
+#   - Runtime-direct dependencies are grouped so security patches surface as
+#     a single reviewable PR rather than a flood.
+#
+# The corresponding actions workflow runs against SHA-pinned refs in
+# .github/workflows/security.yml and .github/workflows/ci.yml, so an action
+# tag update from Dependabot is the only way the SHA changes.
+
+version: 2
+
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: 1
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "security/audit"
+    # Keep runtime-direct dependencies in one group so security patches land
+    # as a single reviewable PR. The dev group is conservative: Dependabot
+    # opens PRs but they remain unaudited, low priority by default.
+    groups:
+      runtime-direct:
+        dependency-type: "production"
+        patterns:
+          - "@azure/*"
+          - "mysql2"
+          - "zod"
+      development:
+        dependency-type: "development"
+        patterns:
+          - "*"
+    ignore:
+      # Pinned intentionally in Todo 13 — never let Dependabot touch them.
+      - dependency-name: "@vscode/vsce"
+        versions: ["*"]
+      - dependency-name: "@cyclonedx/cyclonedx-npm"
+        versions: ["*"]
+      - dependency-name: "license-checker-rseidelsohn"
+        versions: ["*"]
+      - dependency-name: "spdx-expression-parse"
+        versions: ["*"]
+      - dependency-name: "spdx-satisfies"
+        versions: ["*"]
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: 2
+      time: "06:00"
+      timezone: "Etc/UTC"
+    open-pull-requests-limit: 5
+    rebase-strategy: "disabled"
+    labels:
+      - "dependencies"
+      - "security/audit"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

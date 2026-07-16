@@ -1,0 +1,135 @@
+# Security workflow for the mysql-azure-auth preview.
+#
+# Every job declares `permissions: contents: read` so a workflow compromise
+# cannot push, edit, or read PR secrets. The runtime, versions, and tool
+# contracts match the plan body for Todo 13:
+#   - Node 20.16.0 (`actions/setup-node` v4.4.0)
+#   - npm 10.8.1 (lockfile-pinned via packageManager + ci)
+#   - npm audit: runtime only, level=high
+#   - gitleaks: pinned release, downloaded through scripts/run-gitleaks.mjs
+#     using immutable SHAs recorded in scripts/tool-checksums.json
+#   - cyclonedx-npm 4.0.3 SBOM, license-checker-rseidelsohn 4.4.2 inventory
+#
+# The companion `.github/dependabot.yml` schedules monthly upgrades for both
+# the npm and GitHub Actions ecosystems. All actions here are SHA-pinned so
+# Dependabot is the only path to refresh a tag.
+
+name: security
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    # Monthly timing so a missed Dependabot PR still gets caught.
+    - cron: "17 6 3 * *"
+
+permissions: {}
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime-audit:
+    name: Runtime dependency audit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Install lockfile-pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Runtime npm audit (high+)
+        run: npm run security:audit
+
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Install lockfile-pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Deterministic gitleaks detect
+        run: npm run security:secrets
+
+  sbom:
+    name: CycloneDX SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Install lockfile-pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate CycloneDX JSON SBOM
+        run: npm run security:sbom
+
+      - name: Upload SBOM artifact
+        if: always()
+        uses: actions/upload-artifact@65c4c4a8c6fbf1c2ecc65fa49c6630668691b4d6 # v4.6.0
+        with:
+          name: sbom-cdx-${{ github.sha }}
+          path: .omo/evidence/sbom.cdx.json
+          if-no-files-found: warn
+
+  license-inventory:
+    name: Runtime license inventory
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+
+      - name: Setup Node 20.16.0
+        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        with:
+          node-version-file: ".node-version"
+          cache: "npm"
+
+      - name: Install lockfile-pinned dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Build production-only license inventory
+        run: npm run security:licenses
+
+      - name: Upload license inventory artifact
+        if: always()
+        uses: actions/upload-artifact@65c4c4a8c6fbf1c2ecc65fa49c6630668691b4d6 # v4.6.0
+        with:
+          name: licenses-runtime-${{ github.sha }}
+          path: .omo/evidence/licenses.json
+          if-no-files-found: warn

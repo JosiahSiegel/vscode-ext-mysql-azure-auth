@@ -6,10 +6,23 @@ on:
   pull_request:
     branches: [main, master]
 
+# Repository-wide permissions are empty by default; each job declares
+# `permissions: contents: read` (added in Todo 13) so a workflow compromise
+# cannot push, edit, or read PR-side secrets. The runtime gates are
+# unmodified from the Todo 1 baseline.
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-test:
     name: Build, lint, and test
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     strategy:
       fail-fast: false

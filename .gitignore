@@ -8,3 +8,4 @@ out/
 *.playwright*
 *.omo
 *.txt
+.tools/

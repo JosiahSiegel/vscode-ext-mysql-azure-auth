@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "case": "toolchain-fail",
+  "description": "Toolchain-fail fixture. Simulates scripts/run-gitleaks.mjs exiting with the documented SECURITY TOOLCHAIN NOT READY path (in this fixture's case: PLATFORM_UNSUPPORTED because the recorded SHA-256 in scripts/tool-checksums.json does not match the configured host platform). When the verifier cannot run the gitleaks step deterministically, the validator reports SECURITY NOT READY: TOOLCHAIN_FAIL exit 1. All other scripts (audit, sbom, licenses) can still execute in isolation so the failure is precisely pinned to the toolchain path, not a transitive source policy failure.",
+  "toolchain": {
+    "mode": "fail",
+    "gitleaksVersion": "8.24.3",
+    "checksumVerified": false,
+    "extractSuccess": false,
+    "code": "PLATFORM_UNSUPPORTED",
+    "platform": "freebsd-x64",
+    "diagnostic": "no asset recorded for freebsd-x64 in scripts/tool-checksums.json"
+  },
+  "audit": {
+    "runtimeAdvisories": [],
+    "exitCode": 0,
+    "policyExitCode": 0,
+    "policy": "npm audit --omit=dev --audit-level=high"
+  },
+  "sbom": {
+    "produced": true,
+    "path": ".omo/evidence/sbom.cdx.json",
+    "specVersion": "1.5",
+    "bomFormat": "CycloneDX",
+    "components": 41
+  },
+  "licenses": {
+    "inventory": [
+      { "name": "@azure/identity", "version": "4.13.1", "licenses": "MIT" },
+      { "name": "mysql2",          "version": "3.22.6", "licenses": "MIT" },
+      { "name": "zod",             "version": "4.4.3",  "licenses": "MIT" }
+    ]
+  },
+  "exceptions": {
+    "advisories": [],
+    "licenses": []
+  },
+  "expectedResult": "SECURITY NOT READY: TOOLCHAIN_FAIL",
+  "expectedExitCode": 1,
+  "toolchainFailureCode": "PLATFORM_UNSUPPORTED"
+}

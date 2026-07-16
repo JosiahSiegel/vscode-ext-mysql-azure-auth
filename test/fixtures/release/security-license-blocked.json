@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "case": "license-blocked",
+  "description": "License-blocked fixture. A runtime dependency declares a license that license-checker-rseidelsohn cannot parse into a stable SPDX expression AND that contains the literal 'SEE LICENSE IN' marker, which the plan body's runtime-license policy treats as always blocking. The fixture drives the LICENSE_BLOCKED branch deterministically: validator emits SECURITY NOT READY: LICENSE_BLOCKED exit 1. The runtime deps otherwise remain on the 9-SPDX allowlist so the test isolates the licensing path.",
+  "toolchain": {
+    "mode": "fetched",
+    "gitleaksVersion": "8.24.3",
+    "checksumVerified": true,
+    "extractSuccess": true,
+    "code": null,
+    "platform": "windows-x64"
+  },
+  "audit": {
+    "runtimeAdvisories": [],
+    "exitCode": 0,
+    "policyExitCode": 0,
+    "policy": "npm audit --omit=dev --audit-level=high"
+  },
+  "sbom": {
+    "produced": true,
+    "path": ".omo/evidence/sbom.cdx.json",
+    "specVersion": "1.5",
+    "bomFormat": "CycloneDX",
+    "components": 41
+  },
+  "licenses": {
+    "inventory": [
+      { "name": "@azure/identity",             "version": "4.13.1",          "licenses": "MIT" },
+      { "name": "mysql2",                      "version": "3.22.6",          "licenses": "MIT" },
+      { "name": "zod",                         "version": "4.4.3",           "licenses": "MIT" },
+      { "name": "synthetic-forked-package",    "version": "9.9.9",           "licenses": "SEE LICENSE IN vendor-license.txt" }
+    ]
+  },
+  "exceptions": {
+    "advisories": [],
+    "licenses": []
+  },
+  "expectedResult": "SECURITY NOT READY: LICENSE_BLOCKED",
+  "expectedExitCode": 1,
+  "offenderName": "synthetic-forked-package",
+  "offenderVersion": "9.9.9",
+  "offenderCode": "SEE LICENSE IN"
+}

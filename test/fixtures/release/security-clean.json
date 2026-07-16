@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "case": "clean",
+  "description": "Happy-path fixture. Synthetic runtime advisory list carries zero high/critical entries; synthetic runtime license inventory is on the allowlist; toolchain succeeds. The Todo 13 validator runs the four scripts and the four npm scripts and emits SECURITY READY exit 0. No real owner / user / environment data; every entry is a synthetic placeholder so the validator shape can be exercised deterministically.",
+  "toolchain": {
+    "mode": "fetched",
+    "gitleaksVersion": "8.24.3",
+    "checksumVerified": true,
+    "extractSuccess": true,
+    "code": null,
+    "platform": "windows-x64"
+  },
+  "audit": {
+    "runtimeAdvisories": [],
+    "exitCode": 0,
+    "policyExitCode": 0,
+    "policy": "npm audit --omit=dev --audit-level=high",
+    "note": "No runtime advisories at or above 'high' severity on this fixture."
+  },
+  "sbom": {
+    "produced": true,
+    "path": ".omo/evidence/sbom.cdx.json",
+    "specVersion": "1.5",
+    "bomFormat": "CycloneDX",
+    "components": 41
+  },
+  "licenses": {
+    "inventory": [
+      { "name": "@azure/identity", "version": "4.13.1", "licenses": "MIT" },
+      { "name": "mysql2",          "version": "3.22.6", "licenses": "MIT" },
+      { "name": "zod",             "version": "4.4.3",  "licenses": "MIT" }
+    ]
+  },
+  "exceptions": {
+    "advisories": [],
+    "licenses": []
+  },
+  "expectedResult": "SECURITY READY",
+  "expectedExitCode": 0
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "case": "vuln-unapproved",
+  "description": "Vulnerability-unapproved fixture. A runtime advisory whose npmSeverity is moderate (and therefore below npm's --audit-level=high blocking threshold) is recorded against a runtime dep, but no matching securityExceptionApprovals entry exists. The validator cannot auto-exempt low/moderate runtime findings; the policy mandates exact advisoryId match between .github/security-exceptions.json AND owner securityExceptionApprovals before such an advisory can be excepted. Without that match the validator emits SECURITY NOT READY: VULN_UNAPPROVED exit 1.",
+  "toolchain": {
+    "mode": "fetched",
+    "gitleaksVersion": "8.24.3",
+    "checksumVerified": true,
+    "extractSuccess": true,
+    "code": null,
+    "platform": "windows-x64"
+  },
+  "audit": {
+    "exitCode": 1,
+    "policyExitCode": 0,
+    "policy": "npm audit --omit=dev --audit-level=high",
+    "note": "npm audit exits 1 because at least one runtime advisory is present at the same level the policy considers high; the policy-exit code is 0 here because npm-audit's high-threshold captured the entry but the exception approval path failed. The validator never auto-excepts runtime advisories without an exact securityExceptionApprovals match.",
+    "runtimeAdvisories": [
+      {
+        "advisoryId": "SNYK-JS-DEMO-1234",
+        "packageName": "@azure/identity",
+        "packageVersionRange": ">=4.0.0 <4.14.0",
+        "severity": "moderate",
+        "title": "Synthetic advisory for validator testing only",
+        "dev": false,
+        "isVulnerable": true,
+        "vulnerableVersions": ">=4.0.0 <4.14.0",
+        "approvedException": false,
+        "rationale": "synthetic fixture; no real owner approval asserted"
+      }
+    ]
+  },
+  "sbom": {
+    "produced": true,
+    "path": ".omo/evidence/sbom.cdx.json",
+    "specVersion": "1.5",
+    "bomFormat": "CycloneDX",
+    "components": 41
+  },
+  "licenses": {
+    "inventory": [
+      { "name": "@azure/identity", "version": "4.13.1", "licenses": "MIT" },
+      { "name": "mysql2",          "version": "3.22.6", "licenses": "MIT" },
+      { "name": "zod",             "version": "4.4.3",  "licenses": "MIT" }
+    ]
+  },
+  "exceptions": {
+    "advisories": [],
+    "licenses": []
+  },
+  "expectedResult": "SECURITY NOT READY: VULN_UNAPPROVED",
+  "expectedExitCode": 1,
+  "offenderAdvisoryId": "SNYK-JS-DEMO-1234",
+  "offenderPackage": "@azure/identity"
+}

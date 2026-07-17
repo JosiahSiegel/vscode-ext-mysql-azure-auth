@@ -85,7 +85,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         const steps: MigrationStep[] = [
             {
-                id: 'connection-readonly-coercion',
+                id: 'v1',
                 run: async (ctx) => {
                     const raw = new GlobalStateConnectionCatalog(
                         ctx
@@ -104,38 +104,44 @@ export function activate(context: vscode.ExtensionContext): void {
                 },
             },
         ];
-        void (async () => {
-            try {
-                await runMigrations(
-                    context,
-                    logChannel,
-                    steps,
-                    observedVersion ?? undefined
-                );
-            } catch (err: unknown) {
-                const diagnostic = safeDiagnostic({
-                    operation: 'activate:migration-runner',
-                    credentialSource: 'unknown',
-                    errorClass: 'class:migration_failure',
-                });
-                const message =
-                    err instanceof Error ? err.message : String(err ?? '');
-                logChannel.appendLine(
-                    `[activate] migration runner threw (swallowed); message=${message} diagnostic=${JSON.stringify(diagnostic)}`
-                );
-                void err;
-            }
-        })();
+        // The migration runner is gated to Production mode for the same
+        // reason the clobber is: dev/test runs go through the activation
+        // path on every reload, and re-running `loadOrMigrate`-style
+        // rewrites during dev/test would mask regressions in the rewrite
+        // itself. The runner is also dispatched for `sameVersion` and
+        // `firstInstall` transitions because the per-step markers are
+        // version-scoped: a same-version activation on a fresh global
+        // state must still run the steps exactly once.
+        if (context.extensionMode === 1) {
+            void (async () => {
+                try {
+                    await runMigrations(
+                        context,
+                        logChannel,
+                        steps,
+                        observedVersion ?? undefined
+                    );
+                } catch (err: unknown) {
+                    const diagnostic = safeDiagnostic({
+                        operation: 'activate:migration-runner',
+                        credentialSource: 'unknown',
+                        errorClass: 'class:migration_failure',
+                    });
+                    logChannel.appendLine(
+                        `[activate] migration runner threw (swallowed); diagnostic=${JSON.stringify(diagnostic)}`
+                    );
+                    void err;
+                }
+            })();
+        }
     } catch (err: unknown) {
         const diagnostic = safeDiagnostic({
             operation: 'activate:upgrade-gate',
             credentialSource: 'unknown',
             errorClass: 'class:migration_failure',
         });
-        const message =
-            err instanceof Error ? err.message : String(err ?? '');
         logChannel.appendLine(
-            `[activate] upgrade-gate threw (swallowed); message=${message} diagnostic=${JSON.stringify(diagnostic)}`
+            `[activate] upgrade-gate threw (swallowed); diagnostic=${JSON.stringify(diagnostic)}`
         );
         void err;
     }

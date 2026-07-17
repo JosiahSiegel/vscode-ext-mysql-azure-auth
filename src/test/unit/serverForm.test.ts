@@ -7,7 +7,6 @@ const DOM_IDS = [
     'name',
     'host',
     'port',
-    'database',
     'user',
     'ssl',
     'readOnly',
@@ -52,11 +51,25 @@ suite('buildServerFormHtml', () => {
         for (const id of DOM_IDS) assert.ok(html.includes(`id="${id}"`), `missing DOM id: ${id}`);
     });
 
+    test('omits the default-database input entirely', () => {
+        const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
+        const editHtml = buildServerFormHtml({
+            nonce: 'test-nonce',
+            mode: 'edit',
+            existing: makeConnectionConfig(),
+        });
+
+        for (const markup of [html, editHtml]) {
+            assert.strictEqual(markup.includes('name="database"'), false);
+            assert.strictEqual(markup.includes('id="database"'), false);
+        }
+    });
+
     test('preserves the submit payload structure', () => {
         const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
 
         assert.ok(html.includes("vscode.postMessage({ command: 'submit', values })"));
-        for (const field of ['name', 'host', 'port', 'database', 'user']) {
+        for (const field of ['name', 'host', 'port', 'user']) {
             assert.ok(html.includes(`${field}: String(data.get('${field}') || '').trim()`));
         }
         assert.ok(html.includes("ssl: Boolean(data.get('ssl'))"));
@@ -98,7 +111,7 @@ suite('buildServerFormHtml', () => {
         assert.strictEqual(html.includes('<span class="hint">'), false);
         // All hints now appear as <p class="hint"> outside the label.
         const hintCount = (html.match(/<p class="hint">/g) ?? []).length;
-        assert.ok(hintCount >= 4, `expected ≥4 hint paragraphs, got ${hintCount}`);
+        assert.ok(hintCount >= 3, `expected ≥3 hint paragraphs, got ${hintCount}`);
     });
 
     test('transport section is a sibling group, not a .field', () => {

@@ -2,9 +2,6 @@
  * Connection onboarding form. It gathers and validates settings without
  * touching persistence. Submitted values are treated literally; environment
  * variable interpolation is intentionally unsupported.
- *
- * The database remains free-text only. A database quick-pick is intentionally
- * deferred because inserting it would change the established TLS pick contract.
  */
 
 import type { ConnectionConfig } from '../domain';
@@ -129,14 +126,13 @@ export async function resolveSsl(
 }
 
 /**
- * Gather a new connection in the stable order label, host, port, database,
+ * Gather a new connection in the stable order label, host, port, then
  * user, then TLS. Values are persisted literally. Host copy advertises the
  * Azure FQDN shape; label copy suggests `prod`, `stage`, and `dev` suffixes.
  *
  * `FormPrompts` deliberately remains the three-method compatibility contract.
  * A future prompt adapter may accept `suggestions?: readonly string[]`; this
- * is a forward-compatible no-op. Database selection remains free-text so TLS
- * stays the first quick-pick.
+ * is a forward-compatible no-op. TLS stays the first quick-pick.
  */
 export async function collectNewServer(
     sinks: FormPrompts,
@@ -167,12 +163,6 @@ export async function collectNewServer(
         };
     }
 
-    const databaseRaw = await sinks.showInputBox({
-        prompt: 'Default schema',
-        placeHolder: 'appdb',
-    });
-    if (!databaseRaw) return { tag: 'cancelled' };
-
     const userRaw = await sinks.showInputBox({
         prompt: 'Entra principal',
         placeHolder: 'name@your-tenant.onmicrosoft.com',
@@ -181,7 +171,6 @@ export async function collectNewServer(
 
     const name = nameRaw;
     const host = hostRaw;
-    const database = databaseRaw;
     const user = userRaw;
 
     const tlsPick = await sinks.showQuickPick(TLS_ITEMS, {
@@ -198,24 +187,24 @@ export async function collectNewServer(
         }
         return {
             tag: 'ok',
-            config: { id: generateId(), name, host, port, database, user, ssl: true },
+            config: { id: generateId(), name, host, port, user, ssl: true },
         };
     }
 
     return {
         tag: 'ok',
-        config: { id: generateId(), name, host, port, database, user, ssl: ssl.ssl },
+        config: { id: generateId(), name, host, port, user, ssl: ssl.ssl },
     };
 }
 
 /**
- * Edit an existing connection with the same five-input/TLS sequence as create.
+ * Edit an existing connection with the same four-input/TLS sequence as create.
  * Submitted strings are kept literal and the port is validated directly.
  * Host and label copy retain the modern endpoint/group hints.
  *
  * The optional `suggestions?: readonly string[]` prompt evolution is a
- * forward-compatible no-op. Database stays free-text, and dismissing TLS
- * preserves the existing encryption choice.
+ * forward-compatible no-op. Dismissing TLS preserves the existing encryption
+ * choice.
  *
  * On edit, the Azure plaintext block is absolute: the user is bounced back
  * to TLS without saving. Otherwise the resolved ssl matches the existing
@@ -252,12 +241,6 @@ export async function collectEditedServer(
         };
     }
 
-    const databaseRaw = await sinks.showInputBox({
-        prompt: 'Default schema',
-        value: existing.database,
-    });
-    if (databaseRaw === undefined) return { tag: 'cancelled' };
-
     const userRaw = await sinks.showInputBox({
         prompt: 'Entra principal',
         value: existing.user,
@@ -266,7 +249,6 @@ export async function collectEditedServer(
 
     const name = nameRaw;
     const host = hostRaw;
-    const database = databaseRaw;
     const user = userRaw;
 
     const tlsPick = await sinks.showQuickPick(TLS_ITEMS, {
@@ -307,7 +289,6 @@ export async function collectEditedServer(
             name,
             host,
             port,
-            database,
             user,
             ssl,
         },

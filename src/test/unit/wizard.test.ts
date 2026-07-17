@@ -77,7 +77,6 @@ suite('collectNewServer', () => {
                 'production',
                 'prod.example.com',
                 '3306',
-                'appdb',
                 'me@example.com',
             ],
             ['Encrypt (recommended)']
@@ -89,7 +88,6 @@ suite('collectNewServer', () => {
         assert.strictEqual(result.config.name, 'production');
         assert.strictEqual(result.config.host, 'prod.example.com');
         assert.strictEqual(result.config.port, 3306);
-        assert.strictEqual(result.config.database, 'appdb');
         assert.strictEqual(result.config.user, 'me@example.com');
         assert.strictEqual(result.config.ssl, true);
         assert.strictEqual(prompts.warnings.length, 0);
@@ -121,7 +119,7 @@ suite('collectNewServer', () => {
 
     test('preserves environment-like text literally', async () => {
         const prompts = new FakePrompts(
-            ['${env:LABEL}', '${env:MYSQL_HOST}', '3306', '${env:DB}', '${env:USER}'],
+            ['${env:LABEL}', '${env:MYSQL_HOST}', '3306', '${env:USER}'],
             ['Encrypt (recommended)']
         );
 
@@ -131,13 +129,12 @@ suite('collectNewServer', () => {
         if (result.tag !== 'ok') throw new Error('unreachable');
         assert.strictEqual(result.config.name, '${env:LABEL}');
         assert.strictEqual(result.config.host, '${env:MYSQL_HOST}');
-        assert.strictEqual(result.config.database, '${env:DB}');
         assert.strictEqual(result.config.user, '${env:USER}');
     });
 
     test('Plaintext TLS pick on a non-Azure host returns ssl=false only after modal confirmation', async () => {
         const prompts = new FakePrompts(
-            ['n', 'prod.example.com', '3306', 'd', 'u'],
+            ['n', 'prod.example.com', '3306', 'u'],
             ['Plaintext']
         );
         prompts.confirmAnswer = true;
@@ -152,7 +149,7 @@ suite('collectNewServer', () => {
 
     test('Plaintext TLS pick on a non-Azure host without modal confirmation defaults to TLS', async () => {
         const prompts = new FakePrompts(
-            ['n', 'prod.example.com', '3306', 'd', 'u'],
+            ['n', 'prod.example.com', '3306', 'u'],
             ['Plaintext']
         );
         // No modal sink wired and no confirmAnswer set -> form defaults to TLS.
@@ -164,7 +161,7 @@ suite('collectNewServer', () => {
 
     test('Plaintext TLS pick on an Azure host is rejected and bounces the user to TLS-only retry', async () => {
         const prompts = new FakePrompts(
-            ['n', 'prod.mysql.database.azure.com', '3306', 'd', 'u'],
+            ['n', 'prod.mysql.database.azure.com', '3306', 'u'],
             ['Plaintext', undefined]
         );
         const result = await collectNewServer(prompts, () => 'id');
@@ -175,7 +172,7 @@ suite('collectNewServer', () => {
 
     test('dismissed TLS quick-pick defaults to TLS (never silently plaintext)', async () => {
         const prompts = new FakePrompts(
-            ['n', 'prod.example.com', '3306', 'd', 'u'],
+            ['n', 'prod.example.com', '3306', 'u'],
             [undefined]
         );
         const result = await collectNewServer(prompts, () => 'id');
@@ -193,7 +190,6 @@ suite('collectEditedServer', () => {
                 existing.name,
                 existing.host,
                 String(existing.port),
-                existing.database,
                 existing.user,
             ],
             [undefined]
@@ -212,7 +208,6 @@ suite('collectEditedServer', () => {
                 existing.name,
                 existing.host,
                 String(existing.port),
-                existing.database,
                 existing.user,
             ],
             ['Plaintext']
@@ -236,7 +231,6 @@ suite('collectEditedServer', () => {
                 existing.name,
                 existing.host,
                 String(existing.port),
-                existing.database,
                 existing.user,
             ],
             ['Plaintext']
@@ -258,7 +252,7 @@ suite('collectEditedServer', () => {
     test('invalid port returns invalid', async () => {
         const existing = makeConnectionConfig();
         const prompts = new FakePrompts(
-            [existing.name, existing.host, '0', existing.database, existing.user],
+            [existing.name, existing.host, '0', existing.user],
             []
         );
         const result = await collectEditedServer(prompts, existing);

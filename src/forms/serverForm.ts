@@ -9,7 +9,7 @@
  * the pure validation helpers.
  *
  * The webview posts:
- *   { command: 'submit', values: { name, host, port, database, user, ssl } }
+ *   { command: 'submit', values: { name, host, port, user, ssl } }
  *   { command: 'cancel' }
  * The form posts back:
  *   { type: 'ready' }
@@ -27,7 +27,6 @@ const submitSchema = z.object({
     name: z.string(),
     host: z.string(),
     port: z.string(),
-    database: z.string(),
     user: z.string(),
     ssl: z.boolean(),
     readOnly: z.boolean().optional(),
@@ -142,12 +141,10 @@ type ValidationResult =
 function validateAndBuild(options: ServerFormOptions, raw: SubmitValues): ValidationResult {
     const name = raw.name.trim();
     const host = raw.host.trim();
-    const database = raw.database.trim();
     const user = raw.user.trim();
 
     if (!name) return { tag: 'invalid', message: 'Display label is required.' };
     if (!host) return { tag: 'invalid', message: 'Hostname is required.' };
-    // database is now optional; the workbench + driver accept schema-qualified queries against any database the principal has access to.
     if (!user) return { tag: 'invalid', message: 'Entra principal is required.' };
 
     const portStr = raw.port.trim();
@@ -167,7 +164,6 @@ function validateAndBuild(options: ServerFormOptions, raw: SubmitValues): Valida
             name,
             host,
             port,
-            database,
             user,
             ssl: raw.ssl,
         };
@@ -177,7 +173,6 @@ function validateAndBuild(options: ServerFormOptions, raw: SubmitValues): Valida
         name,
         host,
         port,
-        database,
         user,
         ssl: raw.ssl,
         readOnly: raw.readOnly === true,

@@ -109,7 +109,6 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
         name: existing?.name ?? '',
         host: existing?.host ?? '',
         port: existing ? String(existing.port) : '3306',
-        database: existing?.database ?? '',
         user: existing?.user ?? '',
         ssl: existing?.ssl ?? true,
         readOnly: existing?.readOnly ?? false,
@@ -151,11 +150,6 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
     </div>
   </div>
 
-  <div class="field">
-    <label for="database">Default database <span class="optional-tag">(optional)</span></label>
-    <p class="hint">&nbsp;</p>
-    <input id="database" name="database" type="text" placeholder="appdb — leave blank to query any database" value="${escapeServerFormAttribute(values.database)}">
-  </div>
   <div class="field">
     <label for="user">Entra principal</label>
     <p class="hint">name@your-tenant.onmicrosoft.com</p>
@@ -202,7 +196,6 @@ function readValues() {
     name: String(data.get('name') || '').trim(),
     host: String(data.get('host') || '').trim(),
     port: String(data.get('port') || '').trim(),
-    database: String(data.get('database') || '').trim(),
     user: String(data.get('user') || '').trim(),
     ssl: Boolean(data.get('ssl')),
     readOnly: Boolean(data.get('readOnly')),

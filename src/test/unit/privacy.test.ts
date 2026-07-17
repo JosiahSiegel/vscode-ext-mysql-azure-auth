@@ -20,7 +20,7 @@ import {
     GlobalStateConnectionCatalog,
     loadOrMigrateTestShim,
     queryHistoryKey,
-    stripReadOnly,
+    stripPersistedFields,
 } from '../../registry/connectionCatalog';
 import {
     collectNewServer,
@@ -43,7 +43,6 @@ function makeBaseConfig(overrides: Partial<ConnectionConfig> = {}): ConnectionCo
         name: overrides.name ?? 'Test',
         host: overrides.host ?? AZURE_HOST,
         port: overrides.port ?? 3306,
-        database: overrides.database ?? 'appdb',
         user: overrides.user ?? 'me@example.com',
         ssl: overrides.ssl ?? true,
         readOnly: overrides.readOnly,
@@ -102,7 +101,7 @@ suite('privacy', () => {
         ensureMysqlStubbed();
         try {
             const captured: CapturedSinks = { inputs: [], picks: [], warnings: [] };
-            captured.inputs.push('analytics-prod', AZURE_HOST, '3306', 'appdb', 'me@example.com');
+            captured.inputs.push('analytics-prod', AZURE_HOST, '3306', 'me@example.com');
             captured.picks.push('Plaintext'); // explicit plaintext attempt
             const { sinks, opts, pickCount } = makeSinks(captured);
             const outcome = await collectNewServer(
@@ -127,7 +126,7 @@ suite('privacy', () => {
         ensureMysqlStubbed();
         try {
             const captured: CapturedSinks = { inputs: [], picks: [], warnings: [] };
-            captured.inputs.push('analytics-prod', NON_AZURE_HOST, '3306', 'appdb', 'me@example.com');
+            captured.inputs.push('analytics-prod', NON_AZURE_HOST, '3306', 'me@example.com');
             captured.picks.push('Plaintext');
             // Without confirmPlaintext: form must default back to TLS.
             const noConfirm = makeSinks(captured).sinks;
@@ -139,7 +138,7 @@ suite('privacy', () => {
 
             // With confirmPlaintext = false: same result.
             const declined: CapturedSinks = {
-                inputs: ['analytics-prod', NON_AZURE_HOST, '3306', 'appdb', 'me@example.com'],
+                inputs: ['analytics-prod', NON_AZURE_HOST, '3306', 'me@example.com'],
                 picks: ['Plaintext'],
                 warnings: [],
                 plaintextConfirmed: false,
@@ -154,7 +153,7 @@ suite('privacy', () => {
 
             // With confirmPlaintext = true: plaintext is allowed.
             const accepted: CapturedSinks = {
-                inputs: ['analytics-prod', NON_AZURE_HOST, '3306', 'appdb', 'me@example.com'],
+                inputs: ['analytics-prod', NON_AZURE_HOST, '3306', 'me@example.com'],
                 picks: ['Plaintext'],
                 warnings: [],
                 plaintextConfirmed: true,
@@ -207,9 +206,9 @@ suite('privacy', () => {
         assert.strictEqual(coerceReadOnly(makeBaseConfig()).readOnly, false);
     });
 
-    test('stripReadOnly drops the writable readOnly field from the persisted shape', () => {
+    test('stripPersistedFields drops the readOnly field from the persisted shape', () => {
         const withField = makeBaseConfig({ readOnly: false });
-        const stripped = stripReadOnly(withField);
+        const stripped = stripPersistedFields(withField);
         assert.strictEqual('readOnly' in stripped, false);
         // The live value still carries it for runtime read-only enforcement.
         assert.strictEqual(withField.readOnly, false);

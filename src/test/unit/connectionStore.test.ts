@@ -14,7 +14,6 @@ function makeValidConfig(): ConnectionConfig {
         name: 'Test',
         host: 'example.mysql.database.azure.com',
         port: 3306,
-        database: 'appdb',
         user: 'me@example.com',
         ssl: true,
     };

@@ -963,8 +963,8 @@ suite('Extension upgrade', () => {
                 );
                 assert.strictEqual(
                     ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
-                    undefined,
-                    'firstInstall leaves lastMigratedVersion unset until the runner completes'
+                    '0.1.2',
+                    'firstInstall: T5 wiring fires the migration IIFE, which writes lastMigratedVersion = observed version on success'
                 );
                 assert.strictEqual(
                     ctx.globalState.get('mysqlAzureAuth.migration.v1'),
@@ -1040,13 +1040,13 @@ suite('Extension upgrade', () => {
                 // `createInteractiveSpy` will lock the order.
                 assert.strictEqual(
                     webviewClobberTest.wasCalled(),
-                    false,
-                    'present-state contract: clobber sentinel is false until T5 wires activate()'
+                    true,
+                    'T5 wires disposeAllWorkbenchPanels() in the upgrade branch under Production mode'
                 );
                 assert.strictEqual(
                     ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
-                    '0.1.2',
-                    'lastMigratedVersion is unchanged during the composition phase (T5 IIFE has not yet over-written it)'
+                    '0.1.3',
+                    'T5 wiring fires the migration IIFE, which writes lastMigratedVersion = observed version on success'
                 );
             } finally {
                 createInteractiveSpy.restore();

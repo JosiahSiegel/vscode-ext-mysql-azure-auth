@@ -10,7 +10,11 @@
  */
 
 import * as vscode from 'vscode';
-import { GlobalStateConnectionCatalog } from './registry/connectionCatalog';
+import {
+    GlobalStateConnectionCatalog,
+    coerceReadOnly,
+    stripReadOnly,
+} from './registry/connectionCatalog';
 import { ActorRegistry } from './registry/actorRegistry';
 import { ServerTree, WelcomeNode } from './views/connectionExplorer';
 import { QueryWorkbench } from './views/queryWorkbench';
@@ -20,6 +24,9 @@ import { showServerForm } from './forms/serverForm';
 import { openSession } from './commands/openSession';
 import type { ConnectionConfig } from './domain';
 import { escapeSqlIdentifier } from './views/sqlStatements';
+import { classifyVersionTransition } from './registry/versionTracker';
+import { runMigrations, type MigrationStep } from './registry/migrationRunner';
+import { disposeAllWorkbenchPanels } from './registry/webviewClobber';
 
 const WELCOME_VISIBLE_KEY = 'mysqlAzureAuth.welcomeVisible' as const;
 const STATUS_BAR_REFRESH_MS = 5_000;
@@ -48,6 +55,90 @@ export function activate(context: vscode.ExtensionContext): void {
     const logChannel = vscode.window.createOutputChannel('MySQL Azure Auth');
     context.subscriptions.push(logChannel);
     logChannel.appendLine('[activate] composing MySQL Azure Auth…');
+
+    // Version-transition gate (T5): decide whether this activation is an
+    // upgrade / downgrade / malformedVersion before composition runs, so
+    // the clobber fires first and the migration IIFE can race the rest
+    // of activation in the background. A synchronous failure here is
+    // logged via `safeDiagnostic` and swallowed — composition must NOT
+    // be blocked by the upgrade path.
+    try {
+        const observedVersion = (context.extension.packageJSON as {
+            version?: string;
+        }).version;
+        const transition = classifyVersionTransition(
+            observedVersion,
+            context.globalState.get(
+                'mysqlAzureAuth.lastMigratedVersion'
+            ) as string | null | undefined
+        );
+        if (
+            context.extensionMode === 1 &&
+            (transition === 'upgrade' ||
+                transition === 'downgrade' ||
+                transition === 'malformedVersion')
+        ) {
+            disposeAllWorkbenchPanels();
+            logChannel.appendLine(
+                `[activate] upgrade branch: transition=${transition}; webviews disposed`
+            );
+        }
+        const steps: MigrationStep[] = [
+            {
+                id: 'connection-readonly-coercion',
+                run: async (ctx) => {
+                    const raw = new GlobalStateConnectionCatalog(
+                        ctx
+                    ).list().connections;
+                    if (raw.length === 0) return;
+                    const coerced = raw.map(coerceReadOnly);
+                    const rewritten = coerced.some(
+                        (c, i) => c !== raw[i]
+                    );
+                    if (rewritten) {
+                        await ctx.globalState.update(
+                            'connections',
+                            coerced.map(stripReadOnly)
+                        );
+                    }
+                },
+            },
+        ];
+        void (async () => {
+            try {
+                await runMigrations(
+                    context,
+                    logChannel,
+                    steps,
+                    observedVersion ?? undefined
+                );
+            } catch (err: unknown) {
+                const diagnostic = safeDiagnostic({
+                    operation: 'activate:migration-runner',
+                    credentialSource: 'unknown',
+                    errorClass: 'class:migration_failure',
+                });
+                const message =
+                    err instanceof Error ? err.message : String(err ?? '');
+                logChannel.appendLine(
+                    `[activate] migration runner threw (swallowed); message=${message} diagnostic=${JSON.stringify(diagnostic)}`
+                );
+                void err;
+            }
+        })();
+    } catch (err: unknown) {
+        const diagnostic = safeDiagnostic({
+            operation: 'activate:upgrade-gate',
+            credentialSource: 'unknown',
+            errorClass: 'class:migration_failure',
+        });
+        const message =
+            err instanceof Error ? err.message : String(err ?? '');
+        logChannel.appendLine(
+            `[activate] upgrade-gate threw (swallowed); message=${message} diagnostic=${JSON.stringify(diagnostic)}`
+        );
+        void err;
+    }
 
     let composition: Composition;
     try {

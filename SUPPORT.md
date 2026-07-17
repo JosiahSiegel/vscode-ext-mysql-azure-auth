@@ -41,10 +41,11 @@ maintainer has the minimum data to reproduce.
 
 | Version       | Supported          |
 | ------------- | ------------------ |
+| 0.1.1-Preview | Yes (preview only) |
 | 0.1.0-Preview | Yes (preview only) |
 
-Only the `0.1.0-Preview` line is currently supported. Pre-release and
-post-preview tags are not covered by this support policy.
+The `0.1.0-Preview` and `0.1.1-Preview` lines are currently supported.
+Pre-release and post-preview tags are not covered by this support policy.
 
 ## Privacy note
 

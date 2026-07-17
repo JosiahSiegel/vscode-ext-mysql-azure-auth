@@ -10,3 +10,4 @@ out/
 *.omo
 *.txt
 .tools/
+.env

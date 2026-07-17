@@ -4,10 +4,11 @@
 
 | Version       | Supported |
 | ------------- | --------- |
+| 0.1.1-Preview | Yes       |
 | 0.1.0-Preview | Yes       |
 
-Only `0.1.0-Preview` is currently supported. Pre-release and post-release builds
-are not covered.
+Both `0.1.1-Preview` and `0.1.0-Preview` are currently supported. Pre-release
+and post-release builds are not covered.
 
 ## Reporting a Vulnerability
 
@@ -18,9 +19,10 @@ Report security issues to: mailto:josiah0601@gmail.com
 
 ## Acknowledgement and Remediation Targets
 
-Targets below are the maintainer's commitment for the `0.1.0-Preview` line.
-They are best-effort and may shift if the project gains more contributors or
-the owner updates `.omo/inputs/project-direction-open-source.json`.
+Targets below are the maintainer's commitment for the supported
+`0.1.x-Preview` lines. They are best-effort and may shift if the project
+gains more contributors or the owner updates
+`.omo/inputs/project-direction-open-source.json`.
 
 | Severity     | Acknowledgement target | Critical fix target |
 | ------------ | ---------------------- | ------------------- |
@@ -49,13 +51,13 @@ extension has been published:
 vsce <previousVersion> --revert
 ```
 
-`<previousVersion>` must be a published prior version (`0.1.0-Preview`
-candidate tags are eligible). This command prompts the maintainer to confirm
-the downgrade and re-publishes the earlier VSIX.
+`<previousVersion>` must be a published prior version (`0.1.0-Preview` or
+`0.1.1-Preview` candidate tags are eligible). This command prompts the
+maintainer to confirm the downgrade and re-publishes the earlier VSIX.
 
 ### Public manual procedure
 
-When `vsce` is unavailable or the extension is not on the Marketplace yet:
+When `vsce` is unavailable or the extension has not yet been published to the Marketplace:
 
 1. Identify the offending commit (the new commit on top of a known-clean tag).
 2. Revert that commit locally:
@@ -94,9 +96,9 @@ archive the repository when one of the following is true, in order:
    exceeding 12 months and there is no active owner willing to keep the
    extension alive.
 
-Archive means: the repository is marked read-only, the Marketplace listing (if
-any) is withdrawn, and `SECURITY.md` is updated to point readers at the
-recommended successor. Critical security fixes during the deprecation window
+Archive means: the repository is marked read-only, the Marketplace listing
+(publisher `JosiahSiegel`) is withdrawn, and `SECURITY.md` is updated to point
+readers at the recommended successor. Critical security fixes during the deprecation window
 remain best-effort on a case-by-case basis. The MIT license on historical
 commits is unaffected by archival.
 

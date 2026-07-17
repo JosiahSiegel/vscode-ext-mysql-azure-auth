@@ -2,7 +2,7 @@
 
 A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.
 
-`0.1.0-Preview` — public preview. Not affiliated with Microsoft, Azure, Oracle, or MySQL.
+`0.1.1-Preview` — public preview. Not affiliated with Microsoft, Azure, Oracle, or MySQL.
 
 The extension keeps long-running sessions alive by rotating the Entra access token in the background. In normal use a single session lasts as long as you have VS Code open.
 
@@ -196,31 +196,66 @@ See `BUILD.md` for troubleshooting tips and pre-publish checks.
 
 ### Distribution
 
-The extension ships as a `.vsix` and is currently distributed via **GitHub
-Releases** under the `JosiahSiegel` publisher namespace. There is no
-VS Code Marketplace listing yet — that path requires Azure live + pilot
-attestations which the maintainer has not yet collected.
+The extension is distributed through **two parallel channels** under the
+`JosiahSiegel` publisher namespace:
 
-**Install the community preview:**
+- **VS Code Marketplace** — [marketplace.visualstudio.com/items?itemName=JosiahSiegel.mysql-azure-auth](https://marketplace.visualstudio.com/items?itemName=JosiahSiegel.mysql-azure-auth).
+  The standard install path for most users.
+- **GitHub Releases** — [github.com/JosiahSiegel/vscode-ext-mysql-azure-auth/releases](https://github.com/JosiahSiegel/vscode-ext-mysql-azure-auth/releases).
+  Used when you want to verify the SHA-256 checksum before installing, or
+  when you want a specific tagged build that hasn't reached the Marketplace
+  yet.
+
+#### Install from the Marketplace
+
+1. In VS Code: **Extensions** panel (`Ctrl+Shift+X` / `Cmd+Shift+X`).
+2. Search for **MySQL Azure Auth** (publisher: JosiahSiegel).
+3. Click **Install**.
+4. Reload VS Code when prompted.
+
+#### Install from a GitHub Release
 
 1. Open the [Releases page](https://github.com/JosiahSiegel/vscode-ext-mysql-azure-auth/releases).
-2. Download the latest `mysql-azure-auth-0.1.0-preview.vsix` (or a
-   matching tag) and its `.sha256` companion.
-3. In VS Code: **Extensions** panel → `⋯` menu → **Install from VSIX…** →
+2. Download the latest `mysql-azure-auth-<tag>.vsix` and its `.sha256` companion.
+3. Verify the SHA-256 of the VSIX against the published `.sha256` file.
+4. In VS Code: **Extensions** panel → `⋯` menu → **Install from VSIX…** →
    pick the downloaded file.
-4. Verify the SHA-256 of the VSIX against the published `.sha256` file
-   before installing.
 5. Reload VS Code when prompted.
 
-**Cut a new release:**
+#### Cut a new release
 
 ```bash
-git tag 0.1.0-preview             # or 0.2.0, etc.
-git push origin 0.1.0-preview     # triggers .github/workflows/release-github.yml
+git tag 0.1.1-preview             # or 0.2.0, etc.
+git push origin 0.1.1-preview     # triggers .github/workflows/release-github.yml
 ```
 
-The workflow builds the VSIX, hashes it, and attaches it to a GitHub
-Release marked as pre-release. No manual upload step is required.
+The GitHub workflow builds the VSIX, hashes it, publishes it to the
+VS Code Marketplace under the `JosiahSiegel` publisher namespace, and
+attaches it to a GitHub Release marked as pre-release. The Marketplace
+publish reads the version from `package.json#version` (so bump that
+field before tagging if you want a new Marketplace version). The PAT
+used by the workflow lives at the repository's `VSCE_PAT` secret and
+must be issued against the `JosiahSiegel` publisher namespace on the
+Marketplace publisher management page.
+
+The Marketplace publish decision is owned by `verify:t19`, which
+aggregates three upstream gates:
+
+- **Todo 16** — public-source readiness (owner identity, history scan,
+  cleanup markers).
+- **Todo 17** — live Azure test against a real
+  `*.mysql.database.azure.com` endpoint (env-driven harness).
+- **Todo 18** — pilot attestations from real users on real installations.
+
+As of this writing the Marketplace listing at
+`marketplace.visualstudio.com/items?itemName=JosiahSiegel.mysql-azure-auth`
+(version `0.1.1`) is live, but `verify:t19` continues to emit
+`DEFER MARKETPLACE PUBLICATION` because the live and pilot attestations
+have not yet been supplied under `.omo/inputs/`. The gate is an audit
+trail of external attestations; the workflow publishes to both channels
+regardless of gate state so the user-facing distribution never goes
+stale. The `FRESH PUBLIC ROOT REQUIRED` honest disclosure (Todo 3
+history scan) is independent of distribution.
 
 ---
 
@@ -239,7 +274,7 @@ The preview deliberately does not support:
 - **Row or schema editing.** There are no `editRows` / `createTable` / `dropTable` commands and no DDL flows.
 - **DDL or write SQL.** Mutating statements (INSERT/UPDATE/DELETE/...), administrative statements (GRANT/REVOKE/CALL/...), and DDL (CREATE/ALTER/DROP/...) are rejected by `classifySqlBatch` before any pool dispatch.
 - **Telemetry.** No analytics SDK is embedded. The only outbound calls are the VS Code Microsoft auth provider, Azure CLI (fallback), and the MySQL Flexible Server itself.
-- **Marketplace publishing.** This release is a community preview. There is no Marketplace listing yet.
+- **Marketplace publishing requires a PAT.** The release workflow reads `secrets.VSCE_PAT` to publish to the VS Code Marketplace; the secret must be a Personal Access Token issued against the `JosiahSiegel` publisher namespace. The publish runs unconditionally on tag push (the gate is an audit trail, not a pre-publish blocker).
 - **Device-code sign-in.** Removed during the preview; use the VS Code Microsoft auth provider or the Azure CLI fallback.
 - **Schema-aware wizard pickers.** The "Database" field is free text; the form does not query the server during entry.
 

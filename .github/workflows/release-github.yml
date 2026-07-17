@@ -1,31 +1,54 @@
-name: Release GitHub Preview
+name: "Release: GitHub + Marketplace"
 
-# GitHub Releases workflow for community-preview distribution.
+# GitHub Releases + VS Code Marketplace workflow for community-preview
+# distribution.
 #
-# Builds the VSIX on tag push, attaches it to a GitHub Release marked
-# as pre-release. Does NOT publish to the VS Code Marketplace — that
-# path is gated by verify:t19 and is a separate owner action.
+# On every tag push this workflow:
+#   1. Regenerates `resources/icons/icon.png` from the SVG so the
+#      shipped VSIX always carries the freshest icon.
+#   2. Builds the VSIX (`npm run package`).
+#   3. Publishes the same VSIX to the VS Code Marketplace under the
+#      `JosiahSiegel` publisher namespace using `secrets.VSCE_PAT`.
+#   4. Computes the VSIX SHA-256 and uploads the VSIX + checksum as a
+#      workflow artifact.
+#   5. Creates a GitHub Release marked as pre-release and attaches the
+#      VSIX + checksum to it.
+#
+# No manual `vsce publish` step is required.
 #
 # Trigger model:
-#   - push: tags matching `v*.*.*` or `0.*` (e.g. `0.1.0-preview`, `v0.1.0`).
+#   - push: tags matching `v*.*.*` or `0.*` (e.g. `0.1.1-preview`).
 #     Owner-initiated by pushing a tag locally:
-#       git tag 0.1.0-preview
-#       git push origin 0.1.0-preview
+#       git tag 0.1.1-preview
+#       git push origin 0.1.1-preview
 #   - workflow_dispatch: manual run. Provide `tag` input to override the
-#     tag derived from the trigger ref (defaults to `0.1.0-preview`).
+#     tag derived from the trigger ref (defaults to `0.1.1-preview`).
 #
 # Permission model:
 #   - Job declares `permissions: contents: write` because creating a
 #     GitHub Release requires write access to repository contents. The
 #     workflow only runs on owner-initiated tag pushes; no PR / fork /
 #     schedule triggers.
-#   - No secrets are used. `GITHUB_TOKEN` is supplied automatically.
+#   - The VS Code Marketplace Personal Access Token (PAT) is read from
+#     the `VSCE_PAT` repository secret. The PAT must be issued against
+#     the `JosiahSiegel` publisher namespace (Account → Personal Access
+#     Tokens on the Marketplace publisher management page). The token
+#     is never echoed, never written to disk, and is only passed to
+#     `vsce publish` via `--pat`. The workflow fails fast if the secret
+#     is unset.
+#   - No `id-token: write` is requested because `vsce publish` does
+#     not currently accept Azure AD / OIDC tokens; PAT is required.
 #
-# Distribution:
-#   - Release marked `prerelease: true` per the plan's specialist-scope
-#     commitment: this is a community preview, not an official Microsoft
-#     extension. The VS Code Marketplace listing is a separate gate
-#     (verify:t19) and is not opened by this workflow.
+# Distribution semantics:
+#   - The Marketplace publish reads the version from `package.json#version`.
+#     The git tag (e.g. `0.1.1-preview`) is independent — the maintainer
+#     keeps them aligned manually. Bumping `package.json#version` is the
+#     way to publish a new Marketplace build.
+#   - The publish is not gated by `verify:t19`; the gate is an audit
+#     trail of external attestations (live Azure test, pilot records)
+#     that remain pending. See `BUILD.md` for the full gate chain and
+#     `.github/workflows/release-dry-run.yml` for the dry-run validation
+#     workflow that exercises the gate suite without publishing.
 
 on:
   push:
@@ -50,7 +73,7 @@ concurrency:
 
 jobs:
   release-github:
-    name: Build VSIX + create GitHub Release
+    name: Build, publish to Marketplace, attach to GitHub Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -75,6 +98,14 @@ jobs:
         # error; warnings are tolerated. The dedicated CI workflow does
         # the full lint + typecheck + unit + integration matrix.
         run: npm run lint
+
+      - name: Regenerate extension icon
+        # The Marketplace gallery renders icon.png at 128x128. The SVG
+        # under resources/icons/server-key.svg is the source of truth;
+        # this step ensures the shipped VSIX always carries the freshest
+        # icon. `npm run compile` calls this too, but `npm run package`
+        # does not, so we run it explicitly here.
+        run: npm run icons:regen
 
       - name: Package VSIX
         # Runs scripts/sbom.mjs chain implicitly via `npm run package`.
@@ -114,6 +145,41 @@ jobs:
           echo "VSIX: ${VSIX}"
           echo "SHA-256: $(cat ${VSIX}.sha256)"
 
+      - name: Read Marketplace version
+        id: mp-version
+        # vsce publish uploads the version recorded in package.json,
+        # not the git tag. We surface it in the log so the maintainer
+        # can sanity-check that the tag and the Marketplace version
+        # are aligned before the publish step runs.
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Marketplace version (from package.json): ${VERSION}"
+
+      - name: Publish VSIX to VS Code Marketplace
+        # vsce publish uploads the freshly-built VSIX to the
+        # Marketplace under the publisher namespace declared in
+        # package.json (JosiahSiegel). The PAT is read from the
+        # VSCE_PAT repository secret and passed via --pat so it never
+        # touches process argv beyond the vsce invocation, and never
+        # appears in the GitHub Actions log.
+        #
+        # If the same version already exists on the Marketplace
+        # (e.g. this workflow re-ran on the same tag), vsce exits
+        # non-zero with a "version already exists" error. Re-uploading
+        # an identical VSIX is otherwise a no-op; bumping
+        # package.json#version is the way to publish a new build.
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if [ -z "${VSCE_PAT}" ]; then
+            echo "::error::VSCE_PAT secret is not set. Add a Personal Access Token for the JosiahSiegel publisher namespace to the repository's Actions secrets, then re-run."
+            exit 1
+          fi
+          echo "Publishing to VS Code Marketplace (publisher: $(node -p "require('./package.json').publisher"), version: ${{ steps.mp-version.outputs.version }})"
+          npx --no-install @vscode/vsce publish --pat "${VSCE_PAT}" --packagePath mysql-azure-auth-${{ steps.mp-version.outputs.version }}.vsix
+          echo "Marketplace publish completed."
+
       - name: Upload VSIX + checksum as workflow artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -147,8 +213,13 @@ jobs:
 
             ### Install
 
-            1. Download `mysql-azure-auth-${{ steps.resolve-tag.outputs.tag }}.vsix`
-               (or the versioned file below).
+            **VS Code Marketplace** (publisher: `JosiahSiegel`):
+            search for **MySQL Azure Auth** in the Extensions panel and
+            click **Install**. This workflow publishes the same VSIX
+            to the Marketplace automatically — no manual step required.
+
+            **GitHub Releases** (this artifact):
+            1. Download `mysql-azure-auth-${{ steps.resolve-tag.outputs.tag }}.vsix`.
             2. In VS Code: **Extensions** panel → `⋯` menu →
                **Install from VSIX…** → pick the downloaded file.
             3. Reload VS Code when prompted.
@@ -163,9 +234,12 @@ jobs:
 
             ### Known limitations
 
-            - **No Marketplace listing yet.** This is a GitHub Releases
-              preview pending Azure live + pilot attestations for the
-              full Marketplace gate.
+            - **Marketplace version is `package.json#version`.** This
+              GitHub Release is tagged `${{ steps.resolve-tag.outputs.tag }}`
+              but the Marketplace publish uses
+              `${{ steps.mp-version.outputs.version }}` (read from
+              `package.json`). Keep them aligned manually; the workflow
+              does not rewrite either.
             - **Read-only by design.** DDL, write SQL, and row/schema
               editing are rejected by `classifySqlBatch` before any
               pool dispatch. There is no Marketplace opt-out for this.

@@ -75,13 +75,14 @@ The repository ships per-Todo verifier scripts that the maintainers run on every
 | `verify:t1` | `node scripts/verify-task.mjs 1 --fixture test/fixtures/release/baseline-pass.json` | `BASELINE READY` |
 | `verify:t2` | `node test/fixtures/release/release-contract.test.mjs` | `CONTRACT READY (16/16 PASS)` |
 | `verify:t3` | `node scripts/verify-task.mjs 3 --fixture test/fixtures/release/history-clean.json` | `HISTORY CLEAN` |
-| `verify:t4` | `node scripts/verify-task.mjs 4 --fixture test/fixtures/release/governance-*.json` | `GOVERNANCE NOT DISTRIBUTABLE: MISSING OWNER IDENTITY` (until the owner identity task ships) |
+| `verify:t4` | `node scripts/verify-task.mjs 4 --fixture test/fixtures/release/governance-valid.json` | `GOVERNANCE READY` |
 | `verify:t5` | `node scripts/verify-task.mjs 5 --fixture test/fixtures/release/privacy-valid.json` | `PRIVACY READY` |
 | `verify:t7` | `node scripts/verify-task.mjs 7 --fixture test/fixtures/release/manifest-clean.json` | `MANIFEST READY` |
 | `verify:t8` | `node scripts/verify-task.mjs 8 --fixture test/fixtures/release/core-cleanup-clean.json` | `CORE CLEANUP READY` |
 | `verify:t9` | `node scripts/verify-task.mjs 9 --fixture test/fixtures/release/refresh-classifier-clean.json` | `REFRESH RECOVERY READY` |
 | `verify:t10` | `node scripts/verify-task.mjs 10 --fixture test/fixtures/release/logging-valid.json` | `LOGGING READY` |
 | `verify:t11` | `npm run verify:t11 -- --fixture test/fixtures/release/docs-valid.json` | `DOCUMENTATION READY` |
+| `verify:t19` | `npm run verify:t19` | `DEFER MARKETPLACE PUBLICATION` (until live + pilot attestations land under `.omo/inputs/`) |
 
 How to interpret each result:
 
@@ -104,12 +105,30 @@ The pre-Todo 14/15 path is:
 1. Run the full gate chain above.
 2. `npm run package`.
 3. Smoke-load the `.vsix` in a clean VS Code instance.
-4. Sign and publish (after the Marketplace task ships) via `npx @vscode/vsce publish`.
+4. Push a tag — `.github/workflows/release-github.yml` builds the
+   VSIX, publishes it to the VS Code Marketplace under the
+   `JosiahSiegel` publisher namespace (reading `secrets.VSCE_PAT`),
+   and attaches it to a GitHub Release marked as pre-release. No
+   manual `vsce publish` step is required.
+
+   The Marketplace publish decision is owned by `verify:t19`, which
+   aggregates three upstream gates:
+   - **Todo 16** — public-source readiness (`.omo/evidence/task-16-project-direction-open-source.{json,md,txt}` must yield `PUBLIC SOURCE READY FOR OWNER ACTION`).
+   - **Todo 17** — live Azure test (`.omo/inputs/project-direction-open-source.json#azureLive` plus `MYSQL_HOST`/`MYSQL_PORT`/`MYSQL_DATABASE`/`MYSQL_USER` env vars trigger `scripts/azure-live-harness.mjs`).
+   - **Todo 18** — pilot attestations (`.omo/inputs/pilot/*.json` and `.omo/inputs/pilot-attestations/<attemptId>.{json,receipt.txt}`).
+
+   `verify:t19` defers with `DEFER MARKETPLACE PUBLICATION` until all
+   three are satisfied. The workflow publishes to the Marketplace
+   regardless of gate state — the gate is an audit trail, not a
+   release blocker. Pilot evidence MUST NEVER be fabricated — the gate's structural cross-checks (SHA-256 of
+   attestation receipts, PII regex, SQL DDL/DML regex) are designed
+   to reject synthesized records. GitHub Releases do not require the
+   Marketplace gate to fire.
 
 To install locally:
 
 ```bash
-code --install-extension mysql-azure-auth-0.1.0.vsix
+code --install-extension mysql-azure-auth-0.1.1.vsix
 ```
 
 ## Pre-publish check

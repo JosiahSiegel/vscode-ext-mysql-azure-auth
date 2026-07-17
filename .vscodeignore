@@ -28,6 +28,13 @@ esbuild.config.integration.js
 .DS_Store
 Thumbs.db
 
+# Local env files (PATs, dev secrets). `.gitignore` keeps them out of git,
+# but `vsce package` also needs to be told to skip them when assembling
+# the VSIX — otherwise it errors with `.env files should not be packaged`.
+.env
+.env.*
+!.env.example
+
 # Stray root-level test artefacts (intentionally not tracked)
 foofoo.txt
 package-validator-fixture-*.txt

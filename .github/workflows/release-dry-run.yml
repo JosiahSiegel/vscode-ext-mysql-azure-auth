@@ -1,16 +1,15 @@
-name: Release Preview
+name: Release Dry-Run
 
-# Controlled preview release — dry-run only.
+# Dry-run validation of the release-pipeline gates. Never publishes.
 #
-# This workflow never publishes to the VS Code Marketplace and never
-# pushes to a remote. It validates the release-pipeline gates on the
-# current commit so the owner can confirm a clean dry-run before any
-# real distribution step is taken manually.
+# Validates Todo 14 (package gate), Todo 15 (release gate), and the
+# supported-platforms renderer against the current commit so the
+# owner can confirm a clean dry-run before tagging a real release.
 #
-# For actual community-preview distribution (GitHub Releases with the
-# .vsix attached), use .github/workflows/release-github.yml. That
+# For actual community-preview distribution (GitHub Releases + VS Code
+# Marketplace), use `.github/workflows/release-github.yml`. That
 # workflow is triggered by owner-initiated tag pushes (e.g. `git push
-# origin 0.1.0-preview`) and creates a pre-release on the public repo.
+# origin 0.1.1-preview`) and handles both distribution channels.
 #
 # Trigger model:
 #   - workflow_dispatch: manual, owner-initiated run only.

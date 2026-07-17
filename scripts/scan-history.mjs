@@ -34,7 +34,6 @@ const PLACEHOLDER_EMAIL_DOMAINS = new Set([
   "your-tenant.onmicrosoft.com",
   "contoso.com",
   "izs.me",            // npm maintainer email, appears in lockfile deprecation notices
-  "XXXXXXXX.com",      // removed historical contamination
   "synthetic-owner.example",
 ]);
 
@@ -45,12 +44,9 @@ function looksLikePlaceholderEmail(address) {
   return PLACEHOLDER_EMAIL_DOMAINS.has(domain);
 }
 
+// PII rules. Each rule scans every reachable blob via `git cat-file --batch`
+// for content that would be a release-blocker in a public source root.
 const PII_RULES = [
-  {
-    id: "pii-email-XXXXXXXX",
-    pattern: /REDACT7@XXXXXXXX\.com/iu,
-    label: "literal personal email leaked into history",
-  },
   {
     id: "pii-email-generic",
     // Match anything that looks like an email, then filter out reserved

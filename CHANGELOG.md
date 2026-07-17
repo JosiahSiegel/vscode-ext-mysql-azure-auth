@@ -45,6 +45,7 @@ Preview suffix for pre-stable releases.
 - The Server tree status-bar tooltip no longer includes a `/database` segment (e.g., `user@host:port (read-only)`).
 - The Quickpick command palette entries no longer include the `/database` segment in their descriptions.
 - The Query Workbench status bar no longer renders the `Database:` pill.
+- The server explorer's row-count loader now bounds each `SELECT COUNT(*)` query with a 5-second timeout, and a failed count no longer caches `undefined` permanently. Sequential database expansion on the same connection (e.g., opening DB-A to view tables, then opening DB-B) no longer hangs on a slow or transient count failure. Covered by `src/test/unit/connectionTreeDatabaseExpand.test.ts`.
 
 ### Honest disclosures
 

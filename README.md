@@ -12,7 +12,7 @@ The extension keeps long-running sessions alive by rotating the Entra access tok
 
 - **Microsoft Entra ID sign-in** — uses VS Code's built-in Microsoft account provider, with the Azure CLI as a transparent fallback.
 - **Drain-and-replace token rotation** — when the cached token nears expiry the extension builds a fresh `mysql.Pool` bound to the new token, routes new work to it, and closes the old pool after its in-flight queries finish.
-- **Read-only session enforcement** — every checkout executes `SET SESSION TRANSACTION READ ONLY` and classifies user SQL through a deny-list (`classifySqlBatch`) before any `pool.execute`. DDL, write, and administrative statements are rejected fail-closed.
+- **Opt-in read-only session enforcement** — every server profile carries a "Read-only mode" checkbox. When checked, the session runs `SET SESSION TRANSACTION READ ONLY` at checkout and classifies user SQL through a deny-list (`classifySqlBatch`) before any `pool.execute`. DDL, write, and administrative statements are rejected fail-closed. When unchecked, writes are allowed if your account has the necessary database grants.
 - **Multiple servers** — register as many endpoints as you like; each has its own session and credentials.
 - **Server sidebar** — the Servers view in the Activity Bar shows every registered endpoint with its live/idle state. Click to expand and walk tables.
 - **Query workbench** — opens a webview per server. Run SQL, see results in a table, export to CSV or JSON.
@@ -59,15 +59,11 @@ The extension reads from the database; it does not modify schema or data. To min
 - Do **not** grant `ALL PRIVILEGES` to the principal the extension signs in as.
 - Azure RBAC on the server and MySQL-side grants are separate. Granting an Azure data-plane role does **not** create the MySQL user or grant database privileges; you must run the `CREATE USER` / `GRANT` statements above.
 
-### Read-only session is mandatory
+### Opt-in read-only session
 
-Every session the extension opens is read-only:
+Every server profile carries an opt-in "Open session in read-only mode" checkbox (default: checked for new profiles). When checked, the session runs `SET SESSION TRANSACTION READ ONLY` at checkout, and `classifySqlBatch` rejects mutations, DDL, and administrative statements fail-closed. When unchecked, writes are allowed if your account has the necessary database grants.
 
-- On checkout, the session wrapper runs `SET SESSION TRANSACTION READ ONLY`.
-- User SQL is passed through `classifySqlBatch` before any `pool.execute`. The classifier rejects mutations, DDL, administrative statements, and unsupported statements fail-closed.
-- The form does not expose a read-only toggle — there is no write mode to opt out of.
-
-If a write statement is submitted, the session returns `READ_ONLY_REJECTED` and the connection is closed. The Azure RBAC grants you choose do not change this behaviour; the read-only enforcement is application-side and applies to every session regardless of the account's database privileges.
+If a write statement is submitted while a read-only session is open, the session returns `READ_ONLY_REJECTED` and the connection is closed. The Azure RBAC grants you choose do not change this behaviour; the read-only enforcement is application-side and applies to every session opened with the checkbox checked regardless of the account's database privileges.
 
 ---
 
@@ -82,6 +78,7 @@ If a write statement is submitted, the session returns `READ_ONLY_REJECTED` and 
    - **Database** — the schema to bind to (free text; selection is intentionally not automated).
    - **Entra principal** — your Entra group name (e.g. `DBA Team`) or your personal email.
    - **Transport encryption** — `Encrypt (recommended)` (default) or `Plaintext` (warns on selection).
+   - **Open session in read-only mode** — checked by default for new profiles; uncheck if your account has write grants and you want to run INSERT/UPDATE/DELETE/DDL.
 4. Right-click the new server → **Open Session**.
 5. Expand the server to see tables. Right-click a table → **Preview Rows** for a quick `SELECT * FROM ... LIMIT 100`.
 6. From a connected server, run **Open Workbench** to get a SQL editor.

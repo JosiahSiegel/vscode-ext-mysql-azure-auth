@@ -843,8 +843,11 @@ if (!invokedDirectly) {
       }
     }
 
-    // (b) readOnly checkbox is gone from the form HTML.
+    // (b) readOnly checkbox is rendered exactly once as an opt-in toggle.
     //
+    // The form exposes a single `<input id="readOnly" name="readOnly" ...>`
+    // checkbox. Zero occurrences means the opt-in was silently removed;
+    // more than one means a copy/paste regression introduced duplicates.
     // The `readonly-leak` fixture case carries a `fixtureFormHtml` blob
     // containing a deliberately-leaky form, so the validator can exercise
     // its READ_ONLY_REMNANT detection branch without modifying the
@@ -858,11 +861,9 @@ if (!invokedDirectly) {
         ? await readFile(resolve(process.cwd(), PRIVACY_FORM_HTML_PATH), "utf8")
         : "";
     }
-    if (
-      formHtmlSource.includes('id="readOnly"') ||
-      formHtmlSource.includes('name="readOnly"')
-    ) {
-      policyFailures.push("READ_ONLY_REMNANT");
+    const readOnlyMatchCount = (formHtmlSource.match(/id="readOnly"/g) ?? []).length;
+    if (readOnlyMatchCount !== 1) {
+      policyFailures.push(`PRIVACY_READ_ONLY_COUNT=${readOnlyMatchCount}`);
     }
 
     // (c) catalog exports `forgetServer(id)`.

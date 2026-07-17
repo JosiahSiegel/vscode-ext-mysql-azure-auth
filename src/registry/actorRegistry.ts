@@ -293,7 +293,7 @@ export class ActorRegistry {
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_resolve, reject) => {
             timer = setTimeout(
-                () => reject(new TokenAcquisitionTimeoutError(IDENTITY_PROMPT_TIMEOUT_MS)),
+                () => reject(new TokenAcquisitionTimeoutError(this.tokenAcquisitionTimeoutMs)),
                 this.tokenAcquisitionTimeoutMs
             );
             timer.unref();

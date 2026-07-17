@@ -79,6 +79,9 @@ input:focus { border-color: var(--vscode-focusBorder); outline: 1px solid var(--
 .tls-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 7px 9px; border: 1px solid var(--vscode-panel-border); border-radius: 2px; background: var(--vscode-editor-lineHighlightBackground); }
 .tls-row input { margin: 0; accent-color: var(--vscode-charts-purple); }
 .tls-row label { font-weight: 500; }
+.readonly-row { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 7px 9px; border: 1px solid var(--vscode-panel-border); border-radius: 2px; background: var(--vscode-editor-lineHighlightBackground); }
+.readonly-row input { margin: 0; accent-color: var(--vscode-charts-purple); }
+.readonly-row label { font-weight: 500; }
 .tls-hint { color: var(--vscode-descriptionForeground); font-size: 11px; font-weight: 400; }
 .error { grid-column: 1 / -1; display: none; margin-top: 4px; padding: 9px 10px; border: 1px solid var(--vscode-inputValidation-errorBorder); border-radius: 2px; color: var(--vscode-errorForeground); background: var(--vscode-inputValidation-errorBackground); }
 .error.visible { display: block; }
@@ -109,6 +112,7 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
         database: existing?.database ?? '',
         user: existing?.user ?? '',
         ssl: existing?.ssl ?? true,
+        readOnly: existing?.readOnly ?? false,
     };
     const isEdit = options.mode === 'edit';
     const heading = isEdit ? 'Edit server' : 'Register a server';
@@ -116,11 +120,11 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
         ? 'Update connection details. Changes apply to new sessions only.'
         : 'Save an Azure Database for MySQL Flexible Server endpoint for Entra-authenticated sessions.';
 
-    // The read-only checkbox was removed in Todo 5: every session is now
-    // uniformly read-only via `SET SESSION TRANSACTION READ ONLY` at checkout,
-    // and the form no longer exposes a writable control. The catalog still
-    // coerces any persisted `readOnly` flag to `true` so legacy records
-    // continue to behave identically.
+    // The read-only checkbox is rendered as an opt-in toggle. Sessions are
+    // read-only by default at the server-side (`SET SESSION TRANSACTION
+    // READ ONLY` runs at checkout), so leaving this unchecked is the safe
+    // default; checking it surfaces the user's intent on the wire so the
+    // catalog preserves the setting.
 
     return `<main class="profile-shell">
 <header class="profile-head">
@@ -164,6 +168,10 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
       <input id="ssl" name="ssl" type="checkbox" ${values.ssl ? 'checked' : ''}>
       <label for="ssl">Encrypt connection (recommended)</label>
     </div>
+    <div class="readonly-row">
+      <input id="readOnly" name="readOnly" type="checkbox" ${values.readOnly ? 'checked' : ''}>
+      <label for="readOnly">Open session in read-only mode (recommended for browsing)</label>
+    </div>
     <p class="tls-hint">Sessions are read-only by design — every connection runs <code>SET SESSION TRANSACTION READ ONLY</code> at checkout, so the server rejects writes even if your account has permission to make them.</p>
   </div>
 
@@ -197,6 +205,7 @@ function readValues() {
     database: String(data.get('database') || '').trim(),
     user: String(data.get('user') || '').trim(),
     ssl: Boolean(data.get('ssl')),
+    readOnly: Boolean(data.get('readOnly')),
   };
 }
 form.addEventListener('submit', (event) => {

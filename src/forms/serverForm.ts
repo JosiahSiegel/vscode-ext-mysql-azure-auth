@@ -180,7 +180,7 @@ function validateAndBuild(options: ServerFormOptions, raw: SubmitValues): Valida
         database,
         user,
         ssl: raw.ssl,
-        ...(raw.readOnly ? { readOnly: true } : {}),
+        readOnly: raw.readOnly === true,
     };
 
     // Generate an id for the new path; pass through for edit.

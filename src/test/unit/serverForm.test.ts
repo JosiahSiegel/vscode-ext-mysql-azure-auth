@@ -10,6 +10,7 @@ const DOM_IDS = [
     'database',
     'user',
     'ssl',
+    'readOnly',
     'error',
     'cancel',
     'submit',
@@ -135,21 +136,20 @@ suite('buildServerFormHtml', () => {
         assert.strictEqual(keybindings.length, 0, `expected zero keybindings, found ${keybindings.length}`);
     });
 
-    test('read-only checkbox is no longer rendered — every session is read-only by default', () => {
+    test('read-only checkbox is rendered as an opt-in toggle', () => {
         const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
 
-        // Privacy (Todo 5): the readOnly checkbox was removed. Every session
-        // is uniformly read-only via SET SESSION TRANSACTION READ ONLY at
-        // checkout; the user has no write toggle.
-        assert.strictEqual(html.includes('id="readOnly"'), false);
-        assert.strictEqual(html.includes('name="readOnly"'), false);
-        assert.strictEqual(html.includes('Read-only session'), false);
-        assert.strictEqual(html.includes('Server rejects writes'), false);
-        // The form now explains the read-only behaviour in the transport block.
+        // Component C (Todo 5): the readOnly checkbox is back as an opt-in.
+        // The default is unchecked; checking it surfaces the user's intent
+        // on the wire so the catalog preserves the setting.
+        assert.strictEqual(html.includes('id="readOnly"'), true);
+        assert.strictEqual(html.includes('name="readOnly"'), true);
+        assert.ok(html.includes('Open session in read-only mode (recommended for browsing)'));
+        // The form still explains the read-only behaviour in the transport block.
         assert.ok(html.includes('SET SESSION TRANSACTION READ ONLY'));
     });
 
-    test('read-only checkbox is absent even in edit mode', () => {
+    test('read-only checkbox is rendered in new mode and in edit mode for both values', () => {
         const htmlNew = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
         const htmlEditTrue = buildServerFormHtml({
             nonce: 'test-nonce',
@@ -163,14 +163,19 @@ suite('buildServerFormHtml', () => {
         });
 
         for (const html of [htmlNew, htmlEditTrue, htmlEditFalse]) {
-            assert.strictEqual(html.includes('id="readOnly"'), false);
+            assert.strictEqual(html.includes('id="readOnly"'), true);
         }
+        // Edit mode with readOnly: true should preserve the checked state;
+        // edit mode with readOnly: false (or new mode with default) should not.
+        assert.ok(/<input id="readOnly"[^>]*checked/.test(htmlEditTrue));
+        assert.ok(!/<input id="readOnly"[^>]*checked/.test(htmlEditFalse));
+        assert.ok(!/<input id="readOnly"[^>]*checked/.test(htmlNew));
     });
 
-    test('readOnly value is dropped from the submit payload (the field no longer exists)', () => {
+    test('readOnly value is included in the submit payload', () => {
         const html = buildServerFormHtml({ nonce: 'test-nonce', mode: 'new' });
 
-        assert.strictEqual(html.includes("readOnly: Boolean(data.get('readOnly'))"), false);
+        assert.ok(html.includes("readOnly: Boolean(data.get('readOnly'))"));
         assert.ok(html.includes("ssl: Boolean(data.get('ssl'))"));
     });
 });

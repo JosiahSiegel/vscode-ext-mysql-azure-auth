@@ -132,12 +132,14 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
             cache.databases = databases.filter((database) => database.length > 0);
             cache.loadedAt = Date.now();
 
-            // Compatibility for the original tree contract's table-shaped fake.
+            // After the friendly-defaults change, an empty `cache.databases`
+            // means "no databases visible to this principal at this server",
+            // not "render tables as fake databases". The old compat fallback
+            // (which synthesised TableNodes from a bare `SHOW TABLES` call)
+            // is removed: callers now navigate via real DatabaseNodes whose
+            // tables are scoped by name at expansion time.
             if (databases.length > 0 && cache.databases.length === 0) {
-                const tables = await this.readerFor(server.config.id).listTables();
-                return tables.map(
-                    (table) => new TableNode(table, server.config.id, displayDatabase(server.config.database))
-                );
+                return [];
             }
         }
 
@@ -150,7 +152,7 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
         const cache = this.cacheFor(database.connectionId);
         let tables = cache.tables.get(database.databaseName);
         if (tables === undefined) {
-            tables = await this.readerFor(database.connectionId).listTables();
+            tables = await this.readerFor(database.connectionId).listTables(database.databaseName);
             cache.tables.set(database.databaseName, tables);
         }
 

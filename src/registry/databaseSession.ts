@@ -272,8 +272,11 @@ export class DatabaseSession {
         return output.rows.map((row) => String(row['Database'] ?? row['database'] ?? ''));
     }
 
-    async listTables(): Promise<string[]> {
-        const outcome = await this.execute('SHOW TABLES');
+    async listTables(database?: string): Promise<string[]> {
+        const sql = database && database.length > 0
+            ? `SHOW TABLES FROM \`${escapeSqlIdentifier(database)}\``
+            : 'SHOW TABLES';
+        const outcome = await this.execute(sql);
         if (outcome.tag === 'err') {
             throw new QueryProblemError(
                 problemMessage(outcome.problem),

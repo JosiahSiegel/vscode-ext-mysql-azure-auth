@@ -14,6 +14,7 @@ import { __test__, extensionContext } from '../mocks/vscode';
 import {
     ServerTree,
     ServerNode,
+    DatabaseNode,
     TableNode,
 } from '../../views/connectionExplorer';
 import { ActorRegistry } from '../../registry/actorRegistry';
@@ -99,10 +100,7 @@ suite('ServerTree', () => {
     });
 
     test('expanding a connected connection renders table items', async () => {
-        const fake = buildFakePool(
-            [{ Tables_in_db: 'users' }, { Tables_in_db: 'orders' }],
-            [{ name: 'Tables_in_db' }]
-        );
+        const fake = buildFakePool();
         const connRegistry = new ActorRegistry({ identity: fakeIdentity(), poolFactory: fake.factory });
         const connProvider = new ServerTree({
             catalog,
@@ -111,15 +109,87 @@ suite('ServerTree', () => {
         await catalog.add(makeConnectionConfig({ id: 'cfg-1' }));
         await connRegistry.connect('cfg-1', makeConnectionConfig({ id: 'cfg-1' }));
 
+        // Stage 2-tuple responses that drive the new DatabaseNode flow:
+        //   SHOW DATABASES -> [{Database: 'appdb'}]
+        //   SHOW TABLES    -> [{Tables_in_appdb: 'users'}, {Tables_in_appdb: 'orders'}]
+        // The connection profile's default DB is non-empty, so the bare
+        // SHOW TABLES path is used by the explorer.
+        fake.fakeExecute.callsFake(async (sql: string) => {
+            const normalized = sql.trim().toUpperCase();
+            if (normalized === 'SHOW DATABASES') {
+                return [[{ Database: 'appdb' }], undefined] as unknown as never;
+            }
+            return [[{ Tables_in_appdb: 'users' }, { Tables_in_appdb: 'orders' }], undefined] as unknown as never;
+        });
+
         const rootChildren = await connProvider.getChildren();
         const connItem = rootChildren[0];
         assert.ok(connItem instanceof ServerNode);
 
-        const tableChildren = await connProvider.getChildren(connItem);
+        const dbChildren = await connProvider.getChildren(connItem);
+        assert.strictEqual(dbChildren.length, 1);
+        assert.ok(dbChildren[0] instanceof DatabaseNode);
+        assert.strictEqual((dbChildren[0] as DatabaseNode).databaseName, 'appdb');
+
+        const tableChildren = await connProvider.getChildren(dbChildren[0]);
         assert.strictEqual(tableChildren.length, 2);
         assert.ok(tableChildren[0] instanceof TableNode);
         assert.strictEqual((tableChildren[0] as TableNode).tableName, 'users');
         assert.strictEqual((tableChildren[0] as TableNode).connectionId, 'cfg-1');
+    });
+
+    test('expanding a database node scopes SHOW TABLES to that database when default DB is empty', async () => {
+        // Connection profile with an EMPTY default database (the friendly-defaults
+        // configuration). The tree must still expand the database node by issuing
+        // `SHOW TABLES FROM \`db\`` against the chosen database, NOT a bare
+        // `SHOW TABLES` which would fail server-side with "No database selected".
+        const fake = buildFakePool();
+        const connRegistry = new ActorRegistry({ identity: fakeIdentity(), poolFactory: fake.factory });
+        const connProvider = new ServerTree({
+            catalog,
+            registry: connRegistry,
+        });
+        await catalog.add(makeConnectionConfig({ id: 'cfg-1', database: '' }));
+        await connRegistry.connect('cfg-1', makeConnectionConfig({ id: 'cfg-1', database: '' }));
+
+        // The fake pool's execute is a sinon stub. We replace its canned
+        // resolves with a function that records the SQL it receives AND
+        // stages 2-tuple ([rows, fields]) responses for SHOW DATABASES and
+        // SHOW TABLES so the tree expansion completes.
+        const recordedSql: string[] = [];
+        fake.fakeExecute.callsFake(async (sql: string) => {
+            recordedSql.push(sql);
+            const normalized = sql.trim().toUpperCase();
+            if (normalized === 'SHOW DATABASES') {
+                return [[{ Database: 'somedb' }, { Database: 'otherdb' }], undefined] as unknown as never;
+            }
+            if (normalized.startsWith('SHOW TABLES FROM')) {
+                return [[{ 'Tables_in_somedb': 'widgets' }, { 'Tables_in_somedb': 'gadgets' }], undefined] as unknown as never;
+            }
+            return [[], []] as unknown as never;
+        });
+
+        const rootChildren = await connProvider.getChildren();
+        const serverNode = rootChildren[0];
+        assert.ok(serverNode instanceof ServerNode);
+
+        const dbChildren = await connProvider.getChildren(serverNode);
+        const databaseNode = dbChildren.find((item) => item instanceof DatabaseNode) as DatabaseNode;
+        assert.ok(databaseNode, 'expected a DatabaseNode child');
+        assert.strictEqual(databaseNode.databaseName, 'somedb');
+
+        const tableChildren = await connProvider.getChildren(databaseNode);
+        assert.ok(tableChildren.length >= 1, 'expected at least one TableNode');
+        assert.ok(tableChildren.some((item) => item instanceof TableNode));
+
+        // The explorer must have issued SHOW TABLES scoped to the chosen DB
+        // (identifier-escaped), not the bare form that breaks empty-DB profiles.
+        const tablesCall = recordedSql.find((sql) => sql.trim().toUpperCase().startsWith('SHOW TABLES'));
+        assert.ok(tablesCall, `expected a SHOW TABLES call in recorded SQL: ${JSON.stringify(recordedSql)}`);
+        assert.ok(
+            tablesCall!.includes('FROM `somedb`'),
+            `expected SHOW TABLES to be scoped to the chosen database; got: ${tablesCall}`
+        );
     });
 
     test('getChildren on a disconnected connection returns an empty array (no tables)', async () => {

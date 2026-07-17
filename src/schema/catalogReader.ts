@@ -23,10 +23,20 @@ export class CatalogReader {
         return session.listDatabases();
     }
 
-    async listTables(): Promise<string[]> {
+    /**
+     * List table names visible to the current session.
+     *
+     * When `database` is omitted, the connection's default DB applies and
+     * the underlying call emits a bare `SHOW TABLES`. When `database` is
+     * provided, the call is scoped to that DB via `SHOW TABLES FROM \`db\``
+     * — this is the path used when expanding a database node in the tree
+     * for a connection profile whose default DB is empty (the
+     * friendly-defaults configuration).
+     */
+    async listTables(database?: string): Promise<string[]> {
         const session = this.getSession();
         if (!session) throw new Error('Not connected');
-        return session.listTables();
+        return session.listTables(database);
     }
 
     async listColumns(tableName: string): Promise<ColumnInfo[]> {

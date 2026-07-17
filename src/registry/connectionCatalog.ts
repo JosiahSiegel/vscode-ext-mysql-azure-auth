@@ -25,7 +25,14 @@ const connectionSchema = z.object({
     name: z.string().min(1),
     host: z.string().min(1),
     port: z.number().int().min(1).max(65535),
-    database: z.string().min(1),
+    // `database` is optional: a saved connection may omit it when the user
+    // wants to query any database the principal has access to. The zod
+    // schema accepts both `undefined` (field absent) and any string
+    // (including `''`). `parseStoredConnections` then normalises
+    // `undefined` to `''` so the in-memory `ConnectionConfig` value
+    // (which is typed `string`, not `string | undefined`) is uniform
+    // across every read site.
+    database: z.string().optional(),
     user: z.string().min(1),
     ssl: z.boolean(),
     // Optional for backward compatibility with profiles saved before
@@ -59,7 +66,17 @@ export function parseStoredConnections(value: unknown): ParseResult {
         );
         return { connections: [], problems };
     }
-    return { connections: result.data, problems: [] };
+    // Single-point coercion: empty-or-missing `database` is normalised to
+    // a single falsy value so downstream consumers (tree view, quickpick,
+    // session wrapper) can render `${config.database ? config.database : '(no default database)'}`
+    // without splitting on `''` vs `undefined`. The domain type keeps
+    // `database: string` (non-optional) per design, so the value here is
+    // always a string — `''` for the "no default database" state.
+    const connections: readonly ConnectionConfig[] = result.data.map((entry) => ({
+        ...entry,
+        database: entry.database ?? '',
+    }));
+    return { connections, problems: [] };
 }
 
 /** Well-known globalState key for saved connections. */

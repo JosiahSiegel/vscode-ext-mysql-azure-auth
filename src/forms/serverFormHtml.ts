@@ -148,9 +148,9 @@ export function buildServerFormMarkup(options: ServerFormMarkupOptions): string 
   </div>
 
   <div class="field">
-    <label for="database">Default database</label>
+    <label for="database">Default database <span class="optional-tag">(optional)</span></label>
     <p class="hint">&nbsp;</p>
-    <input id="database" name="database" type="text" placeholder="appdb" value="${escapeServerFormAttribute(values.database)}">
+    <input id="database" name="database" type="text" placeholder="appdb — leave blank to query any database" value="${escapeServerFormAttribute(values.database)}">
   </div>
   <div class="field">
     <label for="user">Entra principal</label>
@@ -212,7 +212,7 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (message && message.type === 'error') showError(message.message || 'Validation failed');
 });
-const firstEmpty = ['name', 'host', 'database', 'user'].find((key) => {
+const firstEmpty = ['name', 'host', 'user'].find((key) => {
   const element = document.getElementById(key);
   return element && !element.value;
 });

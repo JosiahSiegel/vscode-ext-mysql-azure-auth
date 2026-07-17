@@ -147,7 +147,7 @@ function validateAndBuild(options: ServerFormOptions, raw: SubmitValues): Valida
 
     if (!name) return { tag: 'invalid', message: 'Display label is required.' };
     if (!host) return { tag: 'invalid', message: 'Hostname is required.' };
-    if (!database) return { tag: 'invalid', message: 'Database is required.' };
+    // database is now optional; the workbench + driver accept schema-qualified queries against any database the principal has access to.
     if (!user) return { tag: 'invalid', message: 'Entra principal is required.' };
 
     const portStr = raw.port.trim();

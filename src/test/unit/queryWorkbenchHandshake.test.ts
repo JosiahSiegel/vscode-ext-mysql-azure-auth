@@ -23,6 +23,11 @@ import * as vscode from 'vscode';
 import { ActorRegistry } from '../../registry/actorRegistry';
 import type { DatabaseSessionConfig, PoolFactory, PoolLike } from '../../registry/databaseSession';
 import * as sinon from 'sinon';
+// Imported here (top of file) so all tests share a single resolve path even
+// though the implementation file uses zod + vscode-only side effects. The
+// `QueryWorkbench` factory below also imports the same module, but importing
+// `parseWebviewRequest` directly avoids needing a panel for pure schema checks.
+import { parseWebviewRequest } from '../../views/queryWorkbench';
 
 type PostMessage = (msg: unknown) => Promise<boolean>;
 type ReceivedMessage = Record<string, unknown>;
@@ -393,6 +398,119 @@ suite('QueryWorkbench handshake', () => {
                 setSqlMessages[setSqlMessages.length - 1]!.sql,
                 previewSql,
                 'last setSql must be the external previewRows SQL'
+            );
+        } finally {
+            capture.restore();
+        }
+    });
+
+    test('webviewRequestSchema accepts a bare openSession command and strips stray fields', () => {
+        // (a) acceptance: a payload that matches the new `openSession` literal
+        // exactly must parse to { tag: 'ok', request: { command: 'openSession' } }.
+        const ok = parseWebviewRequest({ command: 'openSession' });
+        assert.strictEqual(ok.tag, 'ok', `expected ok, got ${ok.tag}`);
+        if (ok.tag !== 'ok') return;
+        assert.strictEqual(ok.request.command, 'openSession');
+        assert.deepStrictEqual(
+            Object.keys(ok.request as Record<string, unknown>),
+            ['command'],
+            'openSession must not carry any extra fields'
+        );
+
+        // (a) cross-variant rejection: a stray `sql` on an `openSession`
+        // payload MUST NOT propagate onto the parsed request. The
+        // `webviewRequestSchema` is a `z.discriminatedUnion` with default
+        // (strip) object semantics; the matching `openSession` variant
+        // shape is `{ command }` only, so any `sql` is dropped before the
+        // switch in `onMessage` ever sees it. This is the protection that
+        // prevents an `openSession` wire message from ever accidentally
+        // dispatching as an `executeQuery`. (Mirror of the
+        // `rejects malformed executeQuery payloads (extra fields still
+        // accepted)` assertion in queryPanel.test.ts, but on the
+        // newly-added literal.)
+        const stripped = parseWebviewRequest({ command: 'openSession', sql: 'SELECT 1' });
+        assert.strictEqual(stripped.tag, 'ok', 'openSession with stray sql must still parse (zod strips extra keys)');
+        if (stripped.tag !== 'ok') return;
+        assert.strictEqual(stripped.request.command, 'openSession');
+        assert.ok(
+            !('sql' in (stripped.request as Record<string, unknown>)),
+            'stray sql must be stripped from an openSession request, not propagated into the switch'
+        );
+
+        // (a) cross-variant rejection sanity: a bare `openSession` where
+        // the discriminator itself is missing must be rejected — proves
+        // we haven't accidentally weakened the union by adding the new
+        // literal.
+        const missing = parseWebviewRequest({ sql: 'SELECT 1' });
+        assert.strictEqual(
+            missing.tag,
+            'parseFailure',
+            `a payload without a discriminator must still be rejected, got ${missing.tag}`
+        );
+    });
+
+    test('postMessage(sessionState) after dispose is dropped by the disposed guard', async () => {
+        // (b) regression: T9 wired `drainPendingMessages()` to publish a
+        // `{ type: 'sessionState', connected }` message as the last step of
+        // the ready handshake. T10 added the matching switch case. If
+        // `dispose()` runs between the webview firing `ready` and the host
+        // draining the buffer, the postMessage call must be a no-op — both
+        // because `dispose()` zeroes `pendingMessages` and because the
+        // private `postMessage()` short-circuits on `this.disposed`.
+        const capture = createCapturingPanel();
+        try {
+            const { QueryWorkbench } = await import('../../views/queryWorkbench');
+            const { extensionContext } = await import('../mocks/vscode');
+            const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
+            const workbench = QueryWorkbench.createOrShow(
+                ctx.extensionUri,
+                'cfg-disposed-sessionState',
+                'production',
+                { registry: new ActorRegistry(), context: ctx }
+            );
+
+            // Stage 1: a user action before `ready` queues a real outbound
+            // message in `pendingMessages`. This proves dispose-then-fireReady
+            // leaves the queue empty (existing dispose-guard semantics).
+            workbench.setEditorSql('SELECT 1');
+
+            // Stage 2: dispose while pendingMessages is non-empty. The
+            // existing contract (see dispose() at queryWorkbench.ts:409-423)
+            // is that this both flips the disposed flag AND clears the
+            // queue.
+            workbench.dispose();
+            assert.strictEqual(
+                (workbench as unknown as { pendingMessages: unknown[] }).pendingMessages.length,
+                0,
+                'dispose must clear pendingMessages'
+            );
+            assert.strictEqual(workbench['disposed'], true);
+
+            // Stage 3: simulate the webview reporting ready after dispose.
+            // drainPendingMessages() runs and then unconditionally fires
+            // `postMessage({ type: 'sessionState', ... })`. The postMessage
+            // guard `if (this.disposed) return;` must swallow it.
+            await capture.fireReady();
+
+            const sessionStateMessages = capture.received.filter((m) => m.type === 'sessionState');
+            assert.strictEqual(
+                sessionStateMessages.length,
+                0,
+                'pending sessionState postMessage must be dropped after dispose; got: ' +
+                    JSON.stringify(capture.received.map((m) => m.type))
+            );
+
+            // Stage 4: a direct postMessage after dispose is also dropped.
+            // This proves the guard works regardless of which path emits.
+            (workbench as unknown as { postMessage: (msg: unknown) => void }).postMessage({
+                type: 'sessionState',
+                connected: true,
+            });
+            assert.strictEqual(
+                capture.received.length,
+                0,
+                'direct postMessage after dispose must not leak to the webview; got: ' +
+                    JSON.stringify(capture.received.map((m) => m.type))
             );
         } finally {
             capture.restore();

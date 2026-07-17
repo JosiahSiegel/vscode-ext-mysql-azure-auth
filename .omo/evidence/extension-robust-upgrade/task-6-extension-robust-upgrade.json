@@ -17,7 +17,7 @@
     "node ./out/test/runUnitTests.js → exit 0 (303 passing)"
   ],
   "manual_qa": "After disposal, a new setEditorSql call and a delayed ready event delivered no webview messages, while buffered messages were cleared.",
-  "commit": "commit deferred",
+  "commit": "c1d5901",
   "risks": [
     "The unit-test runner wrapper ignores the Mocha --grep argument and executes the full suite; the named disposal tests passed visibly on both runs.",
     "src/test/unit/extensionUpgrade.test.ts contained unrelated pre-existing modifications and was not touched or staged."

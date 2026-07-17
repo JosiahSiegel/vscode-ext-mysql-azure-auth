@@ -20,7 +20,14 @@ const DEFAULT_ROW_COUNT_LIMIT = 50;
 const README_URL = 'https://github.com/your-org/mysql-azure-auth#readme';
 const NO_DEFAULT_DATABASE = '(no default database)';
 
-function displayDatabase(database: string): string {
+/**
+ * Renders the default-database name for the tree cell, falling back to a
+ * human-friendly placeholder when the connection profile has no database.
+ *
+ * Exposed for unit testing only — there is no internal caller outside this
+ * module that imports it.
+ */
+export function displayDatabase(database: string): string {
     return database || NO_DEFAULT_DATABASE;
 }
 

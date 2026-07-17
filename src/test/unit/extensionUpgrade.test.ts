@@ -48,6 +48,8 @@ import {
     disposeWorkbenchPanel,
     __test__ as webviewClobberTest,
 } from '../../registry/webviewClobber';
+import { ActorRegistry } from '../../registry/actorRegistry';
+import type { PoolFactory } from '../../registry/databaseSession';
 import { QueryWorkbench } from '../../views/queryWorkbench';
 import { extensionContext } from '../mocks/vscode';
 
@@ -220,7 +222,6 @@ suite('Extension upgrade', () => {
             const original = vscode.window.createWebviewPanel;
             (vscode.window as unknown as { createWebviewPanel: typeof vscode.window.createWebviewPanel }).createWebviewPanel =
                 (() => {
-                    let onDidReceive: ((msg: unknown) => void | Promise<void>) | undefined;
                     const panel: CapturingPanel = {
                         received: [],
                         dispose: sinon.stub(),
@@ -236,10 +237,7 @@ suite('Extension upgrade', () => {
                     const stubPanel = {
                         webview: {
                             html: '',
-                            onDidReceiveMessage: (listener: (msg: unknown) => void | Promise<void>) => {
-                                onDidReceive = listener;
-                                return { dispose: () => undefined };
-                            },
+                            onDidReceiveMessage: () => ({ dispose: () => undefined }),
                             postMessage: panel.postMessage,
                             asWebviewUri: (uri: unknown) => uri,
                         },
@@ -264,19 +262,31 @@ suite('Extension upgrade', () => {
         ): Promise<ReturnType<typeof installPanelFactory>> {
             const handle = installPanelFactory();
             try {
+                const poolStub: PoolFactory = (() => ({
+                    execute: async () => [[], []],
+                    end: async () => undefined,
+                })) as unknown as PoolFactory;
+                const registry = new ActorRegistry({
+                    identity: {
+                        async getAccessToken(): Promise<string> {
+                            return 'clobber-test-token';
+                        },
+                    },
+                    poolFactory: poolStub,
+                });
+                const ctx = extensionContext as unknown as vscode.ExtensionContext;
                 const ids = Array.from({ length: count }, (_, i) => `cfg-clobber-${i}`);
                 for (const id of ids) {
                     QueryWorkbench.createOrShow(
                         extensionContext.extensionUri as unknown as vscode.Uri,
                         id,
                         `production-${id}`,
-                        // The clobber tests don't exercise query execution;
-                        // a stub registry with a no-op identity is enough
-                        // to satisfy the QueryWorkbench constructor.
-                        {
-                            registry: {} as never,
-                            context: extensionContext as unknown as vscode.ExtensionContext,
-                        }
+                        // The clobber tests don't exercise query
+                        // execution; the registry only needs a real
+                        // shape so `QueryWorkbench`'s constructor
+                        // (`src/views/queryWorkbench.ts:119`) can
+                        // call `registry.getConfig`.
+                        { registry, context: ctx }
                     );
                 }
                 return handle;
@@ -288,13 +298,14 @@ suite('Extension upgrade', () => {
 
         test('clears currentPanels and calls dispose once per panel when 3 are seeded', async () => {
             const ctx = await seedPanels(3);
-            // spying on the prototype method captures every panel's
-            // dispose() invocation regardless of whether they share a
-            // prototype (they do — `QueryWorkbench.prototype`).
-            const proto = Object.getPrototypeOf(QueryWorkbench.prototype) as unknown as {
-                dispose: () => void;
-            };
-            const disposeSpy = sinon.spy(proto, 'dispose');
+            // Spying on the prototype method captures every panel's
+            // dispose() invocation. The TS-emitted class puts `dispose`
+            // on `QueryWorkbench.prototype` (so it IS an own property
+            // of that prototype, not of an instance).
+            const disposeSpy = sinon.spy(
+                QueryWorkbench.prototype as unknown as { dispose: () => void },
+                'dispose'
+            );
             try {
                 assert.strictEqual(QueryWorkbench.currentPanels.size, 3);
 
@@ -350,14 +361,23 @@ suite('Extension upgrade', () => {
                     'disposeAllWorkbenchPanels must remove the entry from the map'
                 );
 
+                // A fresh registry handles the second `createOrShow`
+                // because the original panel's seeded connectionId
+                // was destroyed when the panel was disposed.
+                const poolStub: PoolFactory = (() => ({
+                    execute: async () => [[], []],
+                    end: async () => undefined,
+                })) as unknown as PoolFactory;
+                const replacementRegistry = new ActorRegistry({
+                    identity: { async getAccessToken(): Promise<string> { return 't'; } },
+                    poolFactory: poolStub,
+                });
+                const extCtx = extensionContext as unknown as vscode.ExtensionContext;
                 const replacement = QueryWorkbench.createOrShow(
                     extensionContext.extensionUri as unknown as vscode.Uri,
                     'cfg-clobber-0',
                     'production-cfg-clobber-0',
-                    {
-                        registry: {} as never,
-                        context: extensionContext as unknown as vscode.ExtensionContext,
-                    }
+                    { registry: replacementRegistry, context: extCtx }
                 );
 
                 assert.notStrictEqual(
@@ -399,34 +419,28 @@ suite('Extension upgrade', () => {
             }
         });
 
-        test('disposeWorkbenchPanel clears a single panel without affecting siblings', () => {
-            // Direct seeding via the registry avoids the createOrShow
-            // ceremony for a single-entry assertion. The single-entry
-            // path is the only place `disposeWorkbenchPanel` is
-            // exercised today; the production callers go through
-            // `disposeAllWorkbenchPanels`.
-            const only = { connectionId: 'cfg-only' } as unknown as QueryWorkbench;
-            sinon.stub(only, 'dispose').callsFake(() => undefined);
-            const sibling = { connectionId: 'cfg-sibling' } as unknown as QueryWorkbench;
-            sinon.stub(sibling, 'dispose').callsFake(() => undefined);
-            QueryWorkbench.currentPanels.set('cfg-only', only);
-            QueryWorkbench.currentPanels.set('cfg-sibling', sibling);
-
+        test('disposeWorkbenchPanel clears a single panel without affecting siblings', async () => {
+            const ctx = await seedPanels(2);
             try {
                 assert.strictEqual(QueryWorkbench.currentPanels.size, 2);
-                disposeWorkbenchPanel('cfg-only');
+                disposeWorkbenchPanel('cfg-clobber-0');
                 assert.strictEqual(
                     QueryWorkbench.currentPanels.size,
                     1,
                     'disposeWorkbenchPanel must remove exactly the targeted entry'
                 );
                 assert.strictEqual(
-                    QueryWorkbench.currentPanels.has('cfg-sibling'),
+                    QueryWorkbench.currentPanels.has('cfg-clobber-1'),
                     true,
                     'sibling entry must survive a single-entry dispose'
                 );
+                assert.strictEqual(
+                    QueryWorkbench.currentPanels.has('cfg-clobber-0'),
+                    false,
+                    'target entry must be gone after a single-entry dispose'
+                );
             } finally {
-                QueryWorkbench.currentPanels.clear();
+                ctx.restore();
             }
         });
     });

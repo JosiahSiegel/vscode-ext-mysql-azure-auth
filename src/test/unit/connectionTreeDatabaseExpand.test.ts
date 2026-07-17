@@ -22,20 +22,16 @@
  *      READ ONLY SQL is observed in recordedSql.
  *
  *   3. Cache poisoning - one table SELECT COUNT(*) is configured to
- *      never resolve (a controllable deferred()). Under the current
- *      loadRowCounts implementation this causes the entire
- *      loadRowCounts Promise.all to hang, which in turn hangs the
- *      getTables call, which surfaces as the user spinning-load
- *      symptom. This test fails on the current code (Mocha 10 s
- *      timeout). After the T2 fix lands - which adds a per-query
- *      timeout in loadRowCounts and stops caching undefined on
- *      failure - this test passes (subsequent expands NO LONGER hang
- *      and the broken table renders with "? rows").
+ *      never resolve (a controllable deferred()). The post-fix regression
+ *      gate verifies that each expand resolves within a bounded wait, failed
+ *      counts stay uncached and render as "? rows", and another database on
+ *      the same actor remains independently expandable. A no-timeout
+ *      regression is still bounded by Mocha's 20-second timeout.
  *
  * Test 3 uses real timers (not fake ones) because the spinning-load
  * symptom is a REAL timeout, not a fake-timer issue. The Mocha-level
- * this.timeout(10_000) bounds the wait so the test runner can never
- * hang past 10 seconds.
+ * this.timeout(20_000) bounds the wait so the test runner can never
+ * hang past 20 seconds.
  *
  * The plan's literal acceptance criterion defines a single
  * `recordedSql: string[]` array that captures SQL from BOTH the
@@ -463,25 +459,15 @@ suite('ServerTree — sequential database expand', () => {
     });
 
     test('a single failing count query does not poison the row-count cache for subsequent expands', async function () {
-        // The current implementation has no per-query timeout and the catch
-        // handler writes undefined into this.rowCounts on failure.
-        // A failing count therefore either (a) hangs forever if it never
-        // resolves, or (b) poisons the cache with undefined so subsequent
-        // expands short-circuit the count path. Both produce a spinning
-        // load in the UI. After the T2 fix, a deferred count times out
-        // and the cache is not poisoned, so a second expand re-issues
-        // counts and resolves.
-        //
-        // This test is a pre-fix regression gate. On current HEAD the
-        // first expand hangs because loadRowCounts awaits a Promise.all
-        // that includes the never-resolving deferred. The test asserts
-        // that the FIRST expand hangs, that a re-expand of the SAME
-        // database also hangs (proving the actor queue is blocked, NOT
-        // just that the first expand is slow), and that an expand of a
-        // DIFFERENT database ALSO hangs (proving the queue block is not
-        // specific to dba). The Mocha `this.timeout(10_000)` bounds the
-        // outer wait so the runner never actually hangs past that.
-        this.timeout(10_000);
+        // This post-fix regression gate keeps each count query bounded and
+        // leaves failed counts out of the cache. Both dba expands must retry
+        // and resolve with unknown row counts, while dbb must remain
+        // independently expandable. A regression hangs the spinner again and
+        // is bounded by Mocha's outer timeout. Two sequential ~5s count
+        // timeouts (the production COUNT_QUERY_TIMEOUT_MS in
+        // src/views/connectionExplorer.ts) require ~10s of legitimate
+        // wait time, so 20_000 is the minimum safe Mocha bound.
+        this.timeout(20_000);
 
         // One specific count will never resolve. Everything else returns
         // empty rows so the loadRowCounts path reaches that one bad call.
@@ -546,62 +532,31 @@ suite('ServerTree — sequential database expand', () => {
         assert.ok(dbaNode);
         assert.ok(dbbNode);
 
-        // ---- FIRST expand of dba: must hang past the 10 s mark ----
-        //
-        // Promise.race against sleep(11_000) lets us observe the hang
-        // without letting the awaiter truly run forever - if the
-        // brokenCount somehow resolved in some future refactor the
-        // race would resolve with dbaTables instead of TIMED_OUT, the
-        // test would fail loudly, and Mocha would NOT report a hang.
-        // On the current code path Promise.race resolves as TIMED_OUT,
-        // proving the first expand hung. Mocha's outer
-        // this.timeout(10_000) is the real safety net for CI.
-        const firstExpand: Promise<unknown> = provider.getChildren(dbaNode);
-        const firstResult = await Promise.race([
-            firstExpand,
-            sleep(11_000).then(() => 'TIMED_OUT_FIRST_EXPAND'),
-        ]);
-        assert.strictEqual(
-            firstResult,
-            'TIMED_OUT_FIRST_EXPAND',
-            'first expand of dba must hang past 11s on the pre-fix code path; got: ' + String(firstResult)
-        );
+        // The first count times out without writing to the row-count cache.
+        const firstResult = await provider.getChildren(dbaNode);
+        assert.ok(Array.isArray(firstResult));
+        assert.strictEqual(firstResult.length, 1);
+        assert.ok(firstResult[0] instanceof TableNode);
+        assert.strictEqual(firstResult[0].tableName, 'broken');
+        assert.strictEqual(firstResult[0].databaseName, 'dba');
+        assert.strictEqual(firstResult[0].description, '? rows');
 
-        // ---- SECOND expand of dba: must ALSO hang ----
-        //
-        // Even after the first expand's Promise.all was started, the
-        // actor's per-id queue serializes subsequent operations. The
-        // second expand goes through the same queue position and waits
-        // for the deferred to resolve. On current HEAD this means the
-        // second expand ALSO hangs, which is the cache-poisoning /
-        // queue-block symptom the test is here to surface.
-        const secondExpand: Promise<unknown> = provider.getChildren(dbaNode);
-        const secondResult = await Promise.race([
-            secondExpand,
-            sleep(11_000).then(() => 'TIMED_OUT_SECOND_EXPAND'),
-        ]);
-        assert.strictEqual(
-            secondResult,
-            'TIMED_OUT_SECOND_EXPAND',
-            'second expand of dba must also hang on the pre-fix code path; got: ' + String(secondResult)
-        );
+        // Re-expanding dba retries the uncached count and resolves again.
+        const secondResult = await provider.getChildren(dbaNode);
+        assert.ok(Array.isArray(secondResult));
+        assert.strictEqual(secondResult.length, 1);
+        assert.ok(secondResult[0] instanceof TableNode);
+        assert.strictEqual(secondResult[0].tableName, 'broken');
+        assert.strictEqual(secondResult[0].databaseName, 'dba');
+        assert.strictEqual(secondResult[0].description, '? rows');
 
-        // ---- Expand of dbb: must ALSO hang ----
-        //
-        // A different database sharing the same per-actor queue
-        // demonstrates that the block is not scoped to dba - it is a
-        // per-actor queue poison. Anything routed through the actor for
-        // cfg-1 will queue behind the unresolved deferred and hang.
-        const dbbExpand: Promise<unknown> = provider.getChildren(dbbNode);
-        const dbbResult = await Promise.race([
-            dbbExpand,
-            sleep(11_000).then(() => 'TIMED_OUT_DBB_EXPAND'),
-        ]);
-        assert.strictEqual(
-            dbbResult,
-            'TIMED_OUT_DBB_EXPAND',
-            'expand of dbb must also hang behind the unresolved deferred on the pre-fix code path; got: ' + String(dbbResult)
-        );
+        // dbb remains independently expandable after the dba timeout.
+        const dbbResult = await provider.getChildren(dbbNode);
+        assert.ok(Array.isArray(dbbResult));
+        assert.strictEqual(dbbResult.length, 1);
+        assert.ok(dbbResult[0] instanceof TableNode);
+        assert.strictEqual(dbbResult[0].tableName, 'products');
+        assert.strictEqual(dbbResult[0].databaseName, 'dbb');
 
         // Cleanup so the deferred isn't held against a future test run.
         brokenCount.resolve();

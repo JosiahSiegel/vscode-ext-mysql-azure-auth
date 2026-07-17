@@ -9,6 +9,27 @@ Preview suffix for pre-stable releases.
 > remains supported. The surface, behaviour, and supported targets documented
 > here may still change in subsequent Preview revisions.
 
+## 0.2.0-Preview (unreleased)
+
+### Added
+
+- Upgrade-time webview rebuild: on extension upgrade, downgrade, or malformed version detection, every open Query Workbench panel is disposed and rebuilt on next open.
+- `mysqlAzureAuth.lastMigratedVersion` tracking in `globalState` to detect version transitions.
+- Migration runner: `src/registry/migrationRunner.ts` with v1 step `connection-readonly-coercion` (re-applies the existing read-only enforcement to saved connections).
+
+### Changed
+
+- The upgrade path is a no-op when `context.extensionMode` is `Development` (numeric 2) or `Test` (numeric 3) — only installed copies in Production go through the clobber+migration flow.
+- The supported version comparator accepts numeric three-part semver only (e.g. `0.1.2`). Pre-release suffixes like `0.1.2-rc.1` are classified as `malformedVersion`.
+
+### Fixed
+
+- `QueryWorkbench.postMessage` no longer attempts to dispatch to a disposed panel after `dispose()` runs (the drain loop is now routed through the guarded entry point, and `pendingMessages` is cleared on dispose).
+
+### Honest disclosures
+
+- Releases that publish with a pre-release suffix (e.g. `0.1.2-rc.1`) are not yet supported by the upgrade comparator; they will be classified as `malformedVersion` and trigger the rebuild path. Releases MUST use a numeric three-part version until the comparator grows.
+
 ## 0.1.1-Preview
 
 The second Preview line. Workflow + distribution automation only — no

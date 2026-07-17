@@ -278,7 +278,7 @@ The preview deliberately does not support:
 - **Device-code sign-in.** Removed during the preview; use the VS Code Microsoft auth provider or the Azure CLI fallback.
 - **Schema-aware wizard pickers.** The "Database" field is free text; the form does not query the server during entry.
 
-Recovery semantics are bounded: a single refresh failure is retried after 5 seconds; a second failure marks the actor as `failed` and requires the user to run **Open Session** again. The extension does not promise that arbitrary network or server outages are transparent.
+Recovery semantics are bounded: a single refresh failure is retried after 5 seconds; a second failure marks the actor as `failed` and requires the user to run **Open Session** again. The extension does not promise that arbitrary network or server outages are transparent. On extension upgrade (or downgrade), open Query Workbench panels are disposed and rebuilt on next open; persistent state is migrated once per version transition; failures are logged to the "MySQL Azure Auth" output channel and do not block activation.
 
 ---
 

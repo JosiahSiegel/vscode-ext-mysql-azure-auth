@@ -7,10 +7,10 @@
  * This module's contract is what U10's composition root depends on. The
  * tree view and the commands consume the Repository, not globalState.
  *
- * Todo 5 privacy:
- *   - On every `list()`, legacy `readOnly` flags (true / false / missing)
- *     are coerced to `true` and the writable `readOnly` field is dropped
- *     from disk, so the catalog never re-persists a user-toggleable value.
+ * Todo 6 privacy:
+ *   - legacy `readOnly` flags are honoured as the user set them; the
+ *     runtime keeps the field in memory but the catalog never
+ *     re-persists a value the user can toggle.
  *   - `forgetServer(id)` removes both the connection record and the
  *     per-server `mysqlAzureAuth.queryHistory.<id>` key.
  */
@@ -197,13 +197,15 @@ export class GlobalStateConnectionCatalog {
 }
 
 /**
- * Coerce any persisted `readOnly` flag to `true`. The catalog no longer
- * honours a writable `readOnly` value — every session is read-only by
- * design (see Todo 9). Both `true` and `false` (and the legacy missing
- * case) collapse to `true` at the runtime boundary.
+ * Honour the user's opt-in: `readOnly` is preserved as `true` when set;
+ * legacy records with `readOnly: false` (or missing) collapse to
+ * `readOnly: false` to enable the new opt-in default. Records that
+ * explicitly carried `readOnly: true` retain it. The disk shape is
+ * stripped separately by `stripReadOnly`; this helper only normalises
+ * the in-memory value.
  */
 export function coerceReadOnly(config: ConnectionConfig): ConnectionConfig {
-    return { ...config, readOnly: true };
+    return { ...config, readOnly: config.readOnly === true };
 }
 
 /**

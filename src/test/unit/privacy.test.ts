@@ -197,10 +197,14 @@ suite('privacy', () => {
         __test__.reset();
     });
 
-    test('coerceReadOnly collapses true / false / missing to true', () => {
+    test('coerceReadOnly honours the user value: true preserved, false / missing collapse to false', () => {
+        // Todo 6 flipped the contract from collapse-to-true to honour-user.
+        // The catalog now keeps `readOnly: true` only when the user opted in;
+        // any other persisted state collapses to `false` so the new opt-in
+        // default takes effect.
         assert.strictEqual(coerceReadOnly(makeBaseConfig({ readOnly: true })).readOnly, true);
-        assert.strictEqual(coerceReadOnly(makeBaseConfig({ readOnly: false })).readOnly, true);
-        assert.strictEqual(coerceReadOnly(makeBaseConfig()).readOnly, true);
+        assert.strictEqual(coerceReadOnly(makeBaseConfig({ readOnly: false })).readOnly, false);
+        assert.strictEqual(coerceReadOnly(makeBaseConfig()).readOnly, false);
     });
 
     test('stripReadOnly drops the writable readOnly field from the persisted shape', () => {
@@ -214,7 +218,7 @@ suite('privacy', () => {
     test('loadOrMigrateTestShim coerces stored readOnly and strips the field on disk', async () => {
         __test__.reset();
         const ctx = extensionContext as unknown as Pick<ExtensionContext, 'globalState'>;
-        // Legacy payload with `readOnly: false`.
+        // Legacy payload with `readOnly: false` (pre-Todo 6 default).
         await ctx.globalState.update('connections', [
             { ...makeBaseConfig({ id: 'cfg-legacy' }), readOnly: false },
         ]);
@@ -222,7 +226,8 @@ suite('privacy', () => {
         const coerced = loadOrMigrateTestShim(catalog);
         assert.strictEqual(coerced.length, 1);
         assert.ok(coerced[0]);
-        assert.strictEqual(coerced[0].readOnly, true);
+        // Todo 6: legacy `readOnly: false` collapses to `false` (opt-in default).
+        assert.strictEqual(coerced[0].readOnly, false);
         const persisted = ctx.globalState.get('connections') as Array<Record<string, unknown>>;
         assert.ok(persisted);
         assert.strictEqual(persisted.length, 1);

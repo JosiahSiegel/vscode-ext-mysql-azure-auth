@@ -15,9 +15,24 @@ import { GlobalStateConnectionCatalog } from '../registry/connectionCatalog';
 import type { ConnectionConfig, QueryResult } from '../domain';
 
 const CACHE_TTL_MS = 60_000;
+/** Maximum time (ms) to wait for a single SELECT COUNT(*) before giving up. */
+const COUNT_QUERY_TIMEOUT_MS = 5_000;
 const REFRESH_INTERVAL_MS = 2_000;
 const DEFAULT_ROW_COUNT_LIMIT = 50;
 const README_URL = 'https://github.com/your-org/mysql-azure-auth#readme';
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        timer.unref();
+    });
+    try {
+        return await Promise.race([promise, timeout]);
+    } finally {
+        if (timer) clearTimeout(timer);
+    }
+}
 
 type WelcomeAction = 'register' | 'readme';
 type DisposableLike = { readonly dispose: () => void };
@@ -200,10 +215,14 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
             if (this.rowCounts.has(key)) return;
             const sql = `SELECT COUNT(*) FROM \`${escapeIdentifier(database)}\`.\`${escapeIdentifier(table)}\``;
             try {
-                const result = await this.registry.executeQuery(connectionId, sql);
+                const result = await withTimeout(
+                    this.registry.executeQuery(connectionId, sql),
+                    COUNT_QUERY_TIMEOUT_MS,
+                    `count(${escapeIdentifier(database)}.${escapeIdentifier(table)})`
+                );
                 this.rowCounts.set(key, readCount(result));
             } catch {
-                this.rowCounts.set(key, undefined);
+                /* swallow — do not cache, let next expand retry */
             }
         }));
 

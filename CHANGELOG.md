@@ -34,6 +34,22 @@ Preview suffix for pre-stable releases.
 - The 120s identity prompt timeout applies to both the initial sign-in (via VS Code's Microsoft auth provider) and the periodic 45-minute refresh. The timeout is a compile-time constant and not a user setting; changing it requires an edit to `src/identity/vscodeAuth.ts` and a rebuild.
 - When a connection has no default database configured, the Query Workbench status bar shows `Database: (none)` instead of `Database: current` — this is a label update only; queries still need to be schema-qualified to succeed.
 
+## 0.2.1-Preview (unreleased)
+
+### Removed
+
+- The optional "Default database" field on the connection form and wizard. New profiles are saved with no default schema; legacy profiles' stored `database` strings are stripped on next activation by the existing v1 migration step. Queries are now schema-qualified (`SELECT * FROM mydb.users LIMIT 50`) or scoped by clicking a database in the tree.
+
+### Changed
+
+- The Server tree status-bar tooltip no longer includes a `/database` segment (e.g., `user@host:port (read-only)`).
+- The Quickpick command palette entries no longer include the `/database` segment in their descriptions.
+- The Query Workbench status bar no longer renders the `Database:` pill.
+
+### Honest disclosures
+
+- This is a breaking change for any user who relies on saved connection profiles with a default database. After the v1 migration runs once, the field is dropped from globalState permanently; restoring it requires manually editing `globalState.connections` to re-add the field (not supported).
+
 ## 0.1.1-Preview
 
 The second Preview line. Workflow + distribution automation only — no

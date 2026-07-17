@@ -75,7 +75,6 @@ If a write statement is submitted while a read-only session is open, the session
    - **Display label** — a friendly name (e.g. `production-analytics`).
    - **Flexible Server hostname** — your `*.mysql.database.azure.com` FQDN.
    - **TCP port** — defaults to 3306; must be 1–65535.
-   - **Database** — the schema to bind to (free text; selection is intentionally not automated).
    - **Entra principal** — your Entra group name (e.g. `DBA Team`) or your personal email.
    - **Transport encryption** — `Encrypt (recommended)` (default) or `Plaintext` (warns on selection).
    - **Open session in read-only mode** — checked by default for new profiles; uncheck if your account has write grants and you want to run INSERT/UPDATE/DELETE/DDL.

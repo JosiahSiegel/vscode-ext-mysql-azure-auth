@@ -1,0 +1,17 @@
+{
+  "commit": "feat(forms): remove the default-database row from serverForm and wizard",
+  "files_changed": [
+    "src/forms/serverFormHtml.ts",
+    "src/forms/serverForm.ts",
+    "src/forms/connectionForm.ts",
+    "src/test/unit/serverForm.test.ts",
+    "src/test/unit/wizard.test.ts",
+    "src/test/unit/privacy.test.ts"
+  ],
+  "test_count": 332,
+  "tsc_exit": 0,
+  "unit_exit": 0,
+  "eslint_exit": 0,
+  "forbidden_files_diff_empty": true,
+  "working_tree_clean": false
+}

@@ -48,10 +48,14 @@ import {
     disposeWorkbenchPanel,
     __test__ as webviewClobberTest,
 } from '../../registry/webviewClobber';
+import {
+    runMigrations,
+    type MigrationStep,
+} from '../../registry/migrationRunner';
 import { ActorRegistry } from '../../registry/actorRegistry';
 import type { PoolFactory } from '../../registry/databaseSession';
 import { QueryWorkbench } from '../../views/queryWorkbench';
-import { extensionContext } from '../mocks/vscode';
+import { __test__ as vscodeMockTest, extensionContext } from '../mocks/vscode';
 
 suite('Extension upgrade', () => {
     suite('versionTracker.classifyVersionTransition', () => {
@@ -441,6 +445,378 @@ suite('Extension upgrade', () => {
                 );
             } finally {
                 ctx.restore();
+            }
+        });
+    });
+
+    suite('migrationRunner.runMigrations', () => {
+        // Per-test reset so a leaked migration marker from one test
+        // cannot satisfy the "skip" / "ran" assertions of the next.
+        // `__test__.reset()` is the same seam the v1 wiring uses in
+        // src/main.ts (it clears globalState.clear() via the mock).
+        setup(() => {
+            vscodeMockTest.reset();
+        });
+
+        teardown(() => {
+            sinon.restore();
+            vscodeMockTest.reset();
+        });
+
+        // Track every globalState key the runner writes so the
+        // "skip the marker write on a re-run" assertion (b) is
+        // observable, not inferred from a missing update call.
+        function makeSpyGlobalState() {
+            const spy = sinon.spy(extensionContext.globalState, 'update');
+            return spy;
+        }
+
+        function step(
+            id: string,
+            behavior: (
+                ctx: vscode.ExtensionContext
+            ) => Promise<void> | void = async () => undefined
+        ): MigrationStep {
+            return {
+                id,
+                run: behavior as (ctx: vscode.ExtensionContext) => Promise<void>,
+            };
+        }
+
+        // Build a minimal OutputChannel double. We don't read from
+        // it — the assertions are about the runMigrations summary
+        // and the globalState writes, not about the channel's
+        // buffer. Cast to vscode.OutputChannel for the call site.
+        function fakeLogChannel(): vscode.OutputChannel {
+            return {
+                name: 'fake',
+                append: sinon.stub(),
+                appendLine: sinon.stub(),
+                clear: sinon.stub(),
+                show: sinon.stub(),
+                hide: sinon.stub(),
+                dispose: sinon.stub(),
+                replace: sinon.stub(),
+            } as unknown as vscode.OutputChannel;
+        }
+
+        test('first install: every step runs and lastMigratedVersion is written', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const runA = sinon.stub().resolves();
+            const runB = sinon.stub().resolves();
+            const steps: readonly MigrationStep[] = [
+                step('a', runA),
+                step('b', runB),
+            ];
+
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.deepStrictEqual(
+                summary.ran.slice().sort(),
+                ['a', 'b'],
+                'every step should be reported as ran on first install'
+            );
+            assert.deepStrictEqual(summary.skipped, []);
+            assert.deepStrictEqual(summary.failed, []);
+            assert.strictEqual(runA.callCount, 1, 'step a.run must be called once');
+            assert.strictEqual(runB.callCount, 1, 'step b.run must be called once');
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.a'),
+                true,
+                'per-step marker for "a" must be persisted on success'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.b'),
+                true,
+                'per-step marker for "b" must be persisted on success'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                '0.1.2',
+                'lastMigratedVersion must be written after all steps succeed'
+            );
+        });
+
+        test('re-activation with same version: no step runs and no marker is rewritten', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            // Seed the post-migration state from a prior activation
+            // so every step's per-id marker is already `true`.
+            await ctx.globalState.update('mysqlAzureAuth.migration.a', true);
+            await ctx.globalState.update('mysqlAzureAuth.migration.b', true);
+            await ctx.globalState.update(
+                'mysqlAzureAuth.lastMigratedVersion',
+                '0.1.2'
+            );
+
+            const updateSpy = makeSpyGlobalState();
+            const runA = sinon.stub().resolves();
+            const runB = sinon.stub().resolves();
+            const steps: readonly MigrationStep[] = [
+                step('a', runA),
+                step('b', runB),
+            ];
+
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.strictEqual(
+                runA.callCount,
+                0,
+                'step a.run must NOT be called when the marker is already true'
+            );
+            assert.strictEqual(
+                runB.callCount,
+                0,
+                'step b.run must NOT be called when the marker is already true'
+            );
+            assert.deepStrictEqual(summary.ran, []);
+            assert.deepStrictEqual(summary.skipped.slice().sort(), ['a', 'b']);
+            assert.deepStrictEqual(summary.failed, []);
+
+            // The same-value lastMigratedVersion write is allowed
+            // (acceptance criteria (b) explicitly permits it as a
+            // "same-value no-op"). The marker writes must NOT happen.
+            for (const call of updateSpy.getCalls()) {
+                const key = call.args[0] as string;
+                assert.ok(
+                    key === 'mysqlAzureAuth.lastMigratedVersion',
+                    `only the lastMigratedVersion update is permitted on a same-version re-run; got update(${JSON.stringify(key)})`
+                );
+            }
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                '0.1.2',
+                'lastMigratedVersion must still equal the observed version'
+            );
+        });
+
+        test('a step that throws is logged, its id lands in failed, the marker is NOT set, and lastMigratedVersion is NOT updated', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const appendLine = log.appendLine as unknown as sinon.SinonStub;
+            const runA = sinon.stub().resolves();
+            const runB = sinon.stub().rejects(new Error('boom: <bad>'));
+            const steps: readonly MigrationStep[] = [
+                step('a', runA),
+                step('b', runB),
+            ];
+
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.strictEqual(runA.callCount, 1);
+            assert.strictEqual(runB.callCount, 1);
+            assert.deepStrictEqual(summary.ran, ['a']);
+            assert.deepStrictEqual(summary.skipped, []);
+            assert.deepStrictEqual(summary.failed, ['b']);
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.a'),
+                true,
+                'succeeded step "a" marker must still be set'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.b'),
+                undefined,
+                'failed step "b" marker must NOT be set (acceptance criteria c)'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                undefined,
+                'lastMigratedVersion must NOT be updated when any step failed'
+            );
+            assert.ok(
+                appendLine.called,
+                'failure must be logged to the channel via safeDiagnostic (the runner routes the JSON line through appendLine)'
+            );
+        });
+
+        test('a step that throws synchronously still produces a non-rejected summary (sync-throw defense)', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const runA = sinon.stub().resolves();
+            const runB = (() => {
+                throw new Error('synchronous boom');
+            }) as unknown as (ctx: vscode.ExtensionContext) => Promise<void>;
+            const steps: readonly MigrationStep[] = [
+                step('a', runA),
+                step('b', runB),
+            ];
+
+            // The whole point: awaiting the Promise must NOT reject.
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.deepStrictEqual(summary.ran, ['a']);
+            assert.deepStrictEqual(summary.failed, ['b']);
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                undefined,
+                'lastMigratedVersion must NOT be updated when any step failed'
+            );
+        });
+
+        test('steps run in registration order (not parallel)', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const order: string[] = [];
+            const steps: readonly MigrationStep[] = [
+                step('a', async () => {
+                    await new Promise((r) => setTimeout(r, 15));
+                    order.push('a');
+                }),
+                step('b', async () => {
+                    await new Promise((r) => setTimeout(r, 1));
+                    order.push('b');
+                }),
+                step('c', async () => {
+                    order.push('c');
+                }),
+            ];
+
+            await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.deepStrictEqual(
+                order,
+                ['a', 'b', 'c'],
+                'steps must execute strictly in registration order'
+            );
+        });
+
+        test('on re-activation after a partial failure, only the failed step re-runs', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            // First activation: step a succeeds, step b throws.
+            const runA1 = sinon.stub().resolves();
+            const runB1 = sinon.stub().rejects(new Error('first-activation boom'));
+            await runMigrations(
+                ctx,
+                log,
+                [step('a', runA1), step('b', runB1)],
+                '0.1.2'
+            );
+
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.a'),
+                true,
+                'succeeded step must keep its marker across activations'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.migration.b'),
+                undefined,
+                'failed step must NOT keep a marker (so it re-runs next time)'
+            );
+
+            // Second activation: a is skipped (marker set), b re-runs and succeeds.
+            const runA2 = sinon.stub().resolves();
+            const runB2 = sinon.stub().resolves();
+            const summary = await runMigrations(
+                ctx,
+                log,
+                [step('a', runA2), step('b', runB2)],
+                '0.1.2'
+            );
+
+            assert.strictEqual(runA2.callCount, 0, 'a must be skipped (marker persists)');
+            assert.strictEqual(runB2.callCount, 1, 'b must re-run after the prior failure');
+            assert.deepStrictEqual(summary.ran, ['b']);
+            assert.deepStrictEqual(summary.skipped, ['a']);
+            assert.deepStrictEqual(summary.failed, []);
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                '0.1.2',
+                'lastMigratedVersion is now safe to write (all steps succeeded)'
+            );
+        });
+
+        test('a throwing step mid-run does not block subsequent steps', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const runA = sinon.stub().resolves();
+            const runB = sinon.stub().rejects(new Error('mid-run boom'));
+            const runC = sinon.stub().resolves();
+            const steps: readonly MigrationStep[] = [
+                step('a', runA),
+                step('b', runB),
+                step('c', runC),
+            ];
+
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.strictEqual(runA.callCount, 1);
+            assert.strictEqual(runB.callCount, 1);
+            assert.strictEqual(runC.callCount, 1, 'step C must still run after B fails');
+            assert.deepStrictEqual(summary.ran.slice().sort(), ['a', 'c']);
+            assert.deepStrictEqual(summary.failed, ['b']);
+        });
+
+        test('a rejecting lastMigratedVersion write still returns a non-rejected Promise with lastMigratedVersion-write-failed in failed', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            const runA = sinon.stub().resolves();
+            const steps: readonly MigrationStep[] = [step('a', runA)];
+
+            // Make ONLY the final lastMigratedVersion write reject.
+            // Any earlier globalState.update (the per-step markers,
+            // which are the FIRST writes the runner performs on
+            // success) must still succeed so we observe only the
+            // final-write rejection behavior.
+            const original = ctx.globalState.update.bind(ctx.globalState);
+            const stub = sinon.stub(ctx.globalState, 'update').callsFake(
+                async (key: string, _value: unknown) => {
+                    if (key === 'mysqlAzureAuth.lastMigratedVersion') {
+                        throw new Error('globalState.update write rejected (simulated)');
+                    }
+                    return original(key, _value);
+                }
+            );
+
+            // Awaiting the runner MUST NOT reject — that's the
+            // fail-soft contract on the final write.
+            const summary = await runMigrations(ctx, log, steps, '0.1.2');
+
+            assert.deepStrictEqual(summary.ran, ['a']);
+            assert.strictEqual(
+                summary.failed.includes('lastMigratedVersion-write-failed'),
+                true,
+                'failed must include lastMigratedVersion-write-failed when the final write rejects'
+            );
+            assert.strictEqual(
+                ctx.globalState.get('mysqlAzureAuth.lastMigratedVersion'),
+                undefined,
+                'lastMigratedVersion must remain unset when the write itself fails'
+            );
+            stub.restore();
+        });
+
+        test('the function never rejects — every failure path returns a summary', async () => {
+            const ctx = extensionContext as unknown as vscode.ExtensionContext;
+            const log = fakeLogChannel();
+            // Empty step list, all-positive baseline.
+            const baseline = await runMigrations(ctx, log, [], '0.1.2');
+            assert.deepStrictEqual(baseline, { ran: [], skipped: [], failed: [] });
+
+            // null observedVersion still must not throw.
+            const nullVersion = await runMigrations(ctx, log, [], null);
+            assert.deepStrictEqual(nullVersion.failed, []);
+
+            // Steps + a throwing final write: must still resolve.
+            const failingUpdate = sinon
+                .stub(ctx.globalState, 'update')
+                .callsFake(async (key: string, _value: unknown) => {
+                    if (key === 'mysqlAzureAuth.lastMigratedVersion') {
+                        throw new Error('nope');
+                    }
+                    return undefined;
+                });
+            try {
+                const result = await runMigrations(
+                    ctx,
+                    log,
+                    [step('only', async () => undefined)],
+                    null
+                );
+                assert.ok(Array.isArray(result.failed));
+            } finally {
+                failingUpdate.restore();
             }
         });
     });

@@ -13,22 +13,25 @@ Preview suffix for pre-stable releases.
 
 ### Added
 
-- Upgrade-time webview rebuild: on extension upgrade, downgrade, or malformed version detection, every open Query Workbench panel is disposed and rebuilt on next open.
-- `mysqlAzureAuth.lastMigratedVersion` tracking in `globalState` to detect version transitions.
-- Migration runner: `src/registry/migrationRunner.ts` with v1 step `connection-readonly-coercion` (re-applies the existing read-only enforcement to saved connections).
+- Open Session button in the Query Workbench empty state — gives first-time users an explicit entry point to start a session instead of having to find **Open Session** in the Servers view context menu.
+- Opt-in Read-only session checkbox on the connection form — write-capable principals can now request a read-write session. The default (unchecked) still produces a read-only session; checked means "I want writes to work", and the existing deny-list (`classifySqlBatch`) plus `SET SESSION TRANSACTION READ ONLY` only run when the user opts out.
+- Optional Default database field on the connection form — the field is free text and may be left blank. When left blank, the results panel renders `(no default database)` and queries rely on schema-qualified identifiers.
 
 ### Changed
 
-- The upgrade path is a no-op when `context.extensionMode` is `Development` (numeric 2) or `Test` (numeric 3) — only installed copies in Production go through the clobber+migration flow.
-- The supported version comparator accepts numeric three-part semver only (e.g. `0.1.2`). Pre-release suffixes like `0.1.2-rc.1` are classified as `malformedVersion`.
+- User-facing identity prompt timeout raised from 30s to 120s for both initial sign-in and refresh — covers slow network conditions and the VS Code Microsoft auth provider's cold-start latency. The timeout lives in `src/identity/vscodeAuth.ts` as a single compile-time constant.
+- `coerceReadOnly` now honours the user's opt-in instead of forcing every session to read-only — the helper inspects the saved connection's `readOnly` flag and only coerces when the user did NOT opt in. Connections registered before this release are migrated by the v1 migration step (see next bullet).
+- v1 migration step body rewritten to delegate to the new `coerceReadOnly` — the step's marker contract (`connection-readonly-coercion`) is unchanged so re-runs are still idempotent and `migrationRunner` sees the same marker it always did.
+- README's "Read-only session is mandatory" section rewritten to describe the opt-in model — copy now reflects that read-only is the default but is no longer forced.
 
 ### Fixed
 
-- `QueryWorkbench.postMessage` no longer attempts to dispatch to a disposed panel after `dispose()` runs (the drain loop is now routed through the guarded entry point, and `pendingMessages` is cleared on dispose).
+- Nothing in this release.
 
 ### Honest disclosures
 
-- Releases that publish with a pre-release suffix (e.g. `0.1.2-rc.1`) are not yet supported by the upgrade comparator; they will be classified as `malformedVersion` and trigger the rebuild path. Releases MUST use a numeric three-part version until the comparator grows.
+- The auto-scope-to-typed-DB behaviour relies on the user typing schema-qualified identifiers when no default database is set. A bare identifier with no default database returns `ER_NO_DB_ERROR` from the server, surfaced verbatim in the results panel — this is server behaviour, not a workaround we layer on top.
+- The 120s identity prompt timeout applies to both the initial sign-in (via VS Code's Microsoft auth provider) and the periodic 45-minute refresh. The timeout is a compile-time constant and not a user setting; changing it requires an edit to `src/identity/vscodeAuth.ts` and a rebuild.
 
 ## 0.1.1-Preview
 

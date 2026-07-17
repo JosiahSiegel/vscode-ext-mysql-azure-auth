@@ -17,6 +17,7 @@
 import * as vscode from 'vscode';
 import { ActorRegistry } from '../registry/actorRegistry';
 import { EntraTokenProvider } from '../identity/entraToken';
+import { IDENTITY_PROMPT_TIMEOUT_MS, IdentityPromptTimeoutError } from '../identity/identityTimeouts';
 import { redactSensitive } from '../identity/redact';
 import type { ConnectionConfig } from '../domain';
 
@@ -62,16 +63,6 @@ function defaultUi() {
         showError: (m: string): Thenable<string | undefined> =>
             vscode.window.showErrorMessage(m),
     };
-}
-
-const ACCESS_TOKEN_TIMEOUT_MS = 30_000 as const;
-
-class AccessTokenTimeoutError extends Error {
-    override readonly name = 'AccessTokenTimeoutError';
-
-    constructor(readonly timeoutMs: number) {
-        super(`Access token acquisition timed out after ${timeoutMs / 1_000} seconds.`);
-    }
 }
 
 const inFlightSessions = new Map<ConnectionConfig['id'], Promise<void>>();
@@ -125,8 +116,8 @@ export function openSession(
                     try {
                         const timeoutPromise = new Promise<never>((_, reject) => {
                             timeout = setTimeout(() => {
-                                reject(new AccessTokenTimeoutError(ACCESS_TOKEN_TIMEOUT_MS));
-                            }, ACCESS_TOKEN_TIMEOUT_MS);
+                                reject(new IdentityPromptTimeoutError(IDENTITY_PROMPT_TIMEOUT_MS));
+                            }, IDENTITY_PROMPT_TIMEOUT_MS);
                             timeout.unref?.();
                         });
                         await Promise.race([

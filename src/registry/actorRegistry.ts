@@ -25,6 +25,7 @@ import {
     type PoolFactory,
 } from './databaseSession';
 import { EntraTokenProvider } from '../identity/entraToken';
+import { IDENTITY_PROMPT_TIMEOUT_MS, IdentityPromptTimeoutError } from '../identity/identityTimeouts';
 import { toLegacyQueryResult } from '../domain';
 import type {
     ConnectionConfig,
@@ -72,7 +73,7 @@ export interface RegistryOptions {
     identity?: { readonly getAccessToken: () => Promise<string> };
     /** Default refresh interval in ms. Default: 45 minutes. */
     refreshIntervalMs?: number;
-    /** Maximum time to wait for Entra token acquisition. Default: 30 seconds. */
+    /** Maximum time to wait for Entra token acquisition. Default: 120 seconds. */
     tokenAcquisitionTimeoutMs?: number;
     /** Pool factory for tests. Default: DatabaseSession default. */
     poolFactory?: PoolFactory;
@@ -85,13 +86,12 @@ export interface RegistryOptions {
 }
 
 const DEFAULT_REFRESH_MS = 45 * 60 * 1000;
-const DEFAULT_TOKEN_ACQUISITION_TIMEOUT_MS = 30_000;
 
 class TokenAcquisitionTimeoutError extends Error {
     override readonly name = 'TokenAcquisitionTimeoutError';
 
     constructor(readonly timeoutMs: number) {
-        super(`Token acquisition timed out after ${timeoutMs}ms`);
+        super(new IdentityPromptTimeoutError(timeoutMs).message);
     }
 }
 
@@ -122,7 +122,7 @@ export class ActorRegistry {
         this.identity = options.identity ?? new EntraTokenProvider();
         this.defaultRefreshMs = options.refreshIntervalMs ?? DEFAULT_REFRESH_MS;
         this.tokenAcquisitionTimeoutMs =
-            options.tokenAcquisitionTimeoutMs ?? DEFAULT_TOKEN_ACQUISITION_TIMEOUT_MS;
+            options.tokenAcquisitionTimeoutMs ?? IDENTITY_PROMPT_TIMEOUT_MS;
         this.defaultPoolFactory = options.poolFactory;
         this.defaultRefreshRetryDelayMs =
             options.refreshRetryDelayMs ?? REFRESH_RETRY_DELAY_MS;
@@ -293,7 +293,7 @@ export class ActorRegistry {
         let timer: NodeJS.Timeout | undefined;
         const timeout = new Promise<never>((_resolve, reject) => {
             timer = setTimeout(
-                () => reject(new TokenAcquisitionTimeoutError(this.tokenAcquisitionTimeoutMs)),
+                () => reject(new TokenAcquisitionTimeoutError(IDENTITY_PROMPT_TIMEOUT_MS)),
                 this.tokenAcquisitionTimeoutMs
             );
             timer.unref();

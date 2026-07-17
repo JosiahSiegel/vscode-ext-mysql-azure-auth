@@ -19,9 +19,9 @@ Preview suffix for pre-stable releases.
 
 ### Changed
 
-- User-facing identity prompt timeout raised from 30s to 120s for both initial sign-in and refresh — covers slow network conditions and the VS Code Microsoft auth provider's cold-start latency. The timeout lives in `src/identity/vscodeAuth.ts` as a single compile-time constant.
+- User-facing identity prompt timeout raised from 30s to 120s for both initial sign-in and refresh — covers slow network conditions and the VS Code Microsoft auth provider's cold-start latency. The timeout lives in `src/identity/identityTimeouts.ts` as a single compile-time constant.
 - `coerceReadOnly` now honours the user's opt-in instead of forcing every session to read-only — the helper inspects the saved connection's `readOnly` flag and only coerces when the user did NOT opt in. Connections registered before this release are migrated by the v1 migration step (see next bullet).
-- v1 migration step body rewritten to delegate to the new `coerceReadOnly` — the step's marker contract (`connection-readonly-coercion`) is unchanged so re-runs are still idempotent and `migrationRunner` sees the same marker it always did.
+- v1 migration step body rewritten to delegate to the new `coerceReadOnly` — the step's marker contract (`v1`) is unchanged so re-runs are still idempotent and `migrationRunner` sees the same marker it always did.
 - README's "Read-only session is mandatory" section rewritten to describe the opt-in model — copy now reflects that read-only is the default but is no longer forced.
 
 ### Fixed
@@ -32,6 +32,7 @@ Preview suffix for pre-stable releases.
 
 - The auto-scope-to-typed-DB behaviour relies on the user typing schema-qualified identifiers when no default database is set. A bare identifier with no default database returns `ER_NO_DB_ERROR` from the server, surfaced verbatim in the results panel — this is server behaviour, not a workaround we layer on top.
 - The 120s identity prompt timeout applies to both the initial sign-in (via VS Code's Microsoft auth provider) and the periodic 45-minute refresh. The timeout is a compile-time constant and not a user setting; changing it requires an edit to `src/identity/vscodeAuth.ts` and a rebuild.
+- When a connection has no default database configured, the Query Workbench status bar shows `Database: (none)` instead of `Database: current` — this is a label update only; queries still need to be schema-qualified to succeed.
 
 ## 0.1.1-Preview
 

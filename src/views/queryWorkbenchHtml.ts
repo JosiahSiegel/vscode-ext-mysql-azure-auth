@@ -1,5 +1,5 @@
-type HtmlOptions = { readonly nonce: string; readonly serverName: string; readonly readOnly?: boolean };
-type MarkupOptions = { readonly serverName: string; readonly readOnly: boolean; readonly initialSql: string };
+type HtmlOptions = { readonly nonce: string; readonly serverName: string; readonly readOnly?: boolean; readonly database?: string };
+type MarkupOptions = { readonly serverName: string; readonly readOnly: boolean; readonly initialSql: string; readonly database?: string };
 type ScriptOptions = { readonly nonce: string };
 
 const INITIAL_ROW_LIMIT = 200;
@@ -12,7 +12,7 @@ export function buildQueryWorkbenchHtml(options: HtmlOptions): string {
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${options.nonce}';">
 <title>SQL Workbench</title><style>
 ${buildWorkbenchStyles()}
-</style></head><body>${buildWorkbenchMarkup({ serverName: options.serverName, readOnly: options.readOnly === true, initialSql: DEFAULT_INITIAL_SQL })}${buildWorkbenchScript({ nonce: options.nonce })}</body></html>`;
+</style></head><body>${buildWorkbenchMarkup({ serverName: options.serverName, readOnly: options.readOnly === true, initialSql: DEFAULT_INITIAL_SQL, database: options.database ?? '' })}${buildWorkbenchScript({ nonce: options.nonce })}</body></html>`;
 }
 
 export function buildWorkbenchStyles(): string {
@@ -47,7 +47,7 @@ export function buildWorkbenchMarkup(options: MarkupOptions): string {
     return `<div id="app">
 <header class="topbar"><span class="brand">Query Studio</span><span class="connection-context" aria-label="${contextLabel}"><span class="server">${server}</span>${roBadge}</span></header>
 <section class="editor-pane"><div class="editor-shell"><textarea id="editor" class="editor" spellcheck="false" aria-label="SQL editor">${initialSql}</textarea><div id="autocomplete" class="autocomplete"></div><div class="editor-tools"><button id="run" disabled>Run</button><button id="explain" class="secondary" disabled>Explain</button><select id="export" aria-label="Export results" disabled><option value="">Export…</option><option value="csv">CSV</option><option value="json">JSON</option><option value="md">Markdown</option></select></div></div></section>
-<main class="results-pane" aria-live="polite"><div class="statusbar"><span>Server: ${server}${options.readOnly ? ' · RO' : ''}</span><span id="database">Database: current</span><span id="last-time">Time: —</span><span id="last-rows">Rows: —</span></div><div id="cards"><div class="empty empty-action"><p class="empty-tagline">Click to start querying — credentials cached for next time.</p><button id="open-session" class="open-session" type="button">Open Session</button></div></div></main>
+<main class="results-pane" aria-live="polite"><div class="statusbar"><span>Server: ${server}${options.readOnly ? ' · RO' : ''}</span><span id="database">Database: ${escapeHtml(options.database ? 'current' : '(none)')}</span><span id="last-time">Time: —</span><span id="last-rows">Rows: —</span></div><div id="cards"><div class="empty empty-action"><p class="empty-tagline">Click to start querying — credentials cached for next time.</p><button id="open-session" class="open-session" type="button">Open Session</button></div></div></main>
 <aside class="sidebar"><div class="tabs"><button id="history-tab" class="active">History</button><button id="detail-tab">Cell detail</button></div><section id="history"><div class="side-head">Recent queries</div><div id="history-list"></div><button id="history-more" class="secondary hidden">Load more</button></section><section id="detail-panel" class="hidden"><div class="side-head" id="detail-title">Cell detail</div><div id="detail">Select a result cell.</div></section></aside>
 </div>`;
 }

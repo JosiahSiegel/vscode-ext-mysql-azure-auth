@@ -24,7 +24,7 @@ const README_URL = 'https://github.com/your-org/mysql-azure-auth#readme';
 async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms: ${label}`)), ms);
         timer.unref();
     });
     try {
@@ -222,7 +222,7 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
                 );
                 this.rowCounts.set(key, readCount(result));
             } catch {
-                /* swallow — do not cache, let next expand retry */
+                // swallow: timeout/error → do not poison rowCounts cache; next expand will retry.
             }
         }));
 

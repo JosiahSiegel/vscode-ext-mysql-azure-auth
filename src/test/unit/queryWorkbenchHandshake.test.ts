@@ -259,6 +259,81 @@ suite('QueryWorkbench handshake', () => {
         }
     });
 
+    test('postMessage after dispose is a no-op', async () => {
+        const capture = createCapturingPanel();
+        try {
+            const { QueryWorkbench } = await import('../../views/queryWorkbench');
+            const { extensionContext } = await import('../mocks/vscode');
+            const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
+            const workbench = QueryWorkbench.createOrShow(
+                ctx.extensionUri,
+                'cfg-disposed-post',
+                'production',
+                { registry: new ActorRegistry(), context: ctx }
+            );
+
+            await capture.fireReady();
+            workbench.setEditorSql('SELECT 1');
+            workbench.dispose();
+            const receivedBeforePostDispose = capture.received.length;
+            workbench.setEditorSql('SELECT 2');
+
+            assert.strictEqual(workbench['disposed'], true);
+            assert.strictEqual(capture.received.length, receivedBeforePostDispose);
+            assert.strictEqual(capture.received.at(-1)?.sql, 'SELECT 1');
+        } finally {
+            capture.restore();
+        }
+    });
+
+    test('drainPendingMessages after dispose is a no-op', async () => {
+        const capture = createCapturingPanel();
+        try {
+            const { QueryWorkbench } = await import('../../views/queryWorkbench');
+            const { extensionContext } = await import('../mocks/vscode');
+            const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
+            const workbench = QueryWorkbench.createOrShow(
+                ctx.extensionUri,
+                'cfg-disposed-drain',
+                'production',
+                { registry: new ActorRegistry(), context: ctx }
+            );
+
+            workbench.setEditorSql('SELECT 1');
+            workbench.dispose();
+            await capture.fireReady();
+
+            assert.strictEqual(capture.received.length, 0);
+            assert.strictEqual(workbench['pendingMessages'].length, 0);
+        } finally {
+            capture.restore();
+        }
+    });
+
+    test('pendingMessages is empty after dispose', async () => {
+        const capture = createCapturingPanel();
+        try {
+            const { QueryWorkbench } = await import('../../views/queryWorkbench');
+            const { extensionContext } = await import('../mocks/vscode');
+            const ctx = extensionContext as unknown as import('vscode').ExtensionContext;
+            const workbench = QueryWorkbench.createOrShow(
+                ctx.extensionUri,
+                'cfg-disposed-pending',
+                'production',
+                { registry: new ActorRegistry(), context: ctx }
+            );
+
+            workbench.setEditorSql('SELECT 1');
+            workbench.setEditorSql('SELECT 2');
+            workbench.setEditorSql('SELECT 3');
+            workbench.dispose();
+
+            assert.strictEqual(workbench['pendingMessages'].length, 0);
+        } finally {
+            capture.restore();
+        }
+    });
+
     test('fresh workbench auto-seeds a default SELECT * LIMIT 10 query', () => {
         // The default query lives in the webview HTML markup, not in a host-side timer.
         // No panel needs to be created for this assertion.

@@ -355,6 +355,7 @@ export class QueryWorkbench {
     }
 
     private postMessage(message: { readonly type: string; readonly [key: string]: unknown }): void {
+        if (this.disposed) return;
         // Buffer outbound messages until the webview reports ready. Once
         // ready, drain the queue so the initial setSql + executeQuery
         // sequence from commands like previewRows doesn't race the
@@ -388,7 +389,7 @@ export class QueryWorkbench {
         this.webviewReady = true;
         while (this.pendingMessages.length > 0) {
             const next = this.pendingMessages.shift();
-            if (next) void this.panel.webview.postMessage(next);
+            if (next) void this.postMessage(next);
         }
     }
 
@@ -399,6 +400,7 @@ export class QueryWorkbench {
     dispose(): void {
         if (this.disposed) return;
         this.disposed = true;
+        this.pendingMessages.length = 0;
         QueryWorkbench.currentPanels.delete(this.connectionId);
         if (this.forgetOnDispose && this.catalog) {
             // Privacy: when the user actively forgets a server, the

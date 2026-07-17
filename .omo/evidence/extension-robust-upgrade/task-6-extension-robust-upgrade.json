@@ -1,0 +1,25 @@
+{
+  "task": "T6 postMessage guard + drain + pending clear",
+  "changed_files": [
+    "src/views/queryWorkbench.ts",
+    "src/test/unit/queryWorkbenchHandshake.test.ts"
+  ],
+  "tests": [
+    "npx tsc --noEmit → exit 0",
+    "node ./out/test/runUnitTests.js --grep 'after dispose' → 3 passing",
+    "full unit suite → no new failures"
+  ],
+  "commands_actually_run": [
+    "npm run build:test && node ./out/test/runUnitTests.js --grep \"after dispose\" → exit 3 (expected TDD red: 300 passing, 3 failing)",
+    "npx tsc --noEmit → exit 0",
+    "git diff --check → exit 0",
+    "npm run build:test && node ./out/test/runUnitTests.js --grep \"after dispose\" && node ./out/test/runUnitTests.js --grep \"after dispose\" → exit 0 (303 passing twice; runner wrapper did not filter)",
+    "node ./out/test/runUnitTests.js → exit 0 (303 passing)"
+  ],
+  "manual_qa": "After disposal, a new setEditorSql call and a delayed ready event delivered no webview messages, while buffered messages were cleared.",
+  "commit": "commit deferred",
+  "risks": [
+    "The unit-test runner wrapper ignores the Mocha --grep argument and executes the full suite; the named disposal tests passed visibly on both runs.",
+    "src/test/unit/extensionUpgrade.test.ts contained unrelated pre-existing modifications and was not touched or staged."
+  ]
+}

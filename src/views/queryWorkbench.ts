@@ -46,6 +46,7 @@ const webviewRequestSchema = z.discriminatedUnion('command', [
     }),
     z.object({ command: z.literal('loadMore'), statementIndex: z.number().int().nonnegative() }),
     z.object({ command: z.literal('loadCompletions'), sql: z.string(), prefix: z.string() }),
+    z.object({ command: z.literal('openSession') }),
     z.object({ command: z.literal('ready') }),
 ]);
 
@@ -270,6 +271,13 @@ export class QueryWorkbench {
             case 'loadCompletions':
                 await this.sendCompletions(request.sql, request.prefix);
                 return;
+            case 'openSession': {
+                const config = this.registry.getConfig(this.connectionId);
+                if (config) {
+                    void vscode.commands.executeCommand('mysqlAzureAuth.connectServer', config);
+                }
+                return;
+            }
             case 'ready':
                 this.drainPendingMessages();
                 return;
@@ -391,6 +399,7 @@ export class QueryWorkbench {
             const next = this.pendingMessages.shift();
             if (next) void this.postMessage(next);
         }
+        this.postMessage({ type: 'sessionState', connected: this.registry.isConnected(this.connectionId) });
     }
 
     private get historyKey(): string {

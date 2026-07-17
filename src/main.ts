@@ -97,14 +97,19 @@ export function activate(context: vscode.ExtensionContext): void {
                     ).list().connections;
                     if (raw.length === 0) return;
                     const coerced = raw.map(coerceReadOnly);
-                    const rewritten = coerced.some(
-                        (c, i) => c !== raw[i]
+                    const stripped = coerced.map(stripReadOnly);
+                    // Rewrite when any persisted record still carries a
+                    // legacy `readOnly` key (true OR false) on disk —
+                    // stripReadOnly removes the key, so an entry whose
+                    // disk shape carries `readOnly` will differ from
+                    // the stripped normalised shape. This also catches
+                    // entries whose coerced value differs from the
+                    // parsed record for any other reason.
+                    const rewritten = raw.some(
+                        (r, i) => 'readOnly' in r || r !== stripped[i]
                     );
                     if (rewritten) {
-                        await ctx.globalState.update(
-                            'connections',
-                            coerced.map(stripReadOnly)
-                        );
+                        await ctx.globalState.update('connections', stripped);
                     }
                 },
             },

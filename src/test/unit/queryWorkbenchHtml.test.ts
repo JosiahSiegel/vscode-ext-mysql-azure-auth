@@ -20,7 +20,6 @@ const DOM_IDS = [
     'run',
     'explain',
     'export',
-    'database',
     'last-time',
     'last-rows',
     'cards',
@@ -166,5 +165,32 @@ suite('buildQueryWorkbenchHtml', () => {
         assert.doesNotThrow(() => {
             new Function(script);
         }, 'inline webview script must parse as valid JavaScript in read-only mode');
+    });
+
+    test('does not render the Database: pill after the default-database field is dropped', () => {
+        // Regression: drop-default-database T3 removed the
+        // `<span id="database">Database: ...</span>` pill entirely so the
+        // statusbar carries only Server / Time / Rows. The statusbar
+        // shape is now permanent; reintroducing the pill requires an
+        // explicit decision in a future plan, not a quiet re-add.
+        const html = buildQueryWorkbenchHtml({ nonce: 'test-nonce', serverName: 'production' });
+        const htmlRo = buildQueryWorkbenchHtml({ nonce: 'test-nonce', serverName: 'production', readOnly: true });
+
+        assert.ok(
+            !html.includes('id="database"'),
+            'workbench markup must not include the Database: pill after drop-default-database T3'
+        );
+        assert.ok(
+            !htmlRo.includes('id="database"'),
+            'read-only workbench markup must not include the Database: pill either'
+        );
+        assert.ok(
+            !html.includes('>Database:'),
+            'workbench markup must not contain a "Database:" label after drop-default-database T3'
+        );
+        // Statusbar still carries Server / Time / Rows.
+        assert.ok(html.includes('Server: production'), 'statusbar must still surface the server label');
+        assert.ok(html.includes('id="last-time"'), 'statusbar must still carry the Time span');
+        assert.ok(html.includes('id="last-rows"'), 'statusbar must still carry the Rows span');
     });
 });

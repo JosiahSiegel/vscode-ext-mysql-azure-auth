@@ -149,8 +149,8 @@ suite('ServerTree', () => {
             catalog,
             registry: connRegistry,
         });
-        await catalog.add(makeConnectionConfig({ id: 'cfg-1', database: '' }));
-        await connRegistry.connect('cfg-1', makeConnectionConfig({ id: 'cfg-1', database: '' }));
+        await catalog.add(makeConnectionConfig({ id: 'cfg-1' }));
+        await connRegistry.connect('cfg-1', makeConnectionConfig({ id: 'cfg-1' }));
 
         // The fake pool's execute is a sinon stub. We replace its canned
         // resolves with a function that records the SQL it receives AND

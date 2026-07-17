@@ -30,12 +30,7 @@ import { disposeAllWorkbenchPanels } from './registry/webviewClobber';
 
 const WELCOME_VISIBLE_KEY = 'mysqlAzureAuth.welcomeVisible' as const;
 const STATUS_BAR_REFRESH_MS = 5_000;
-const NO_DEFAULT_DATABASE = '(no default database)';
 let activeRegistry: ActorRegistry | undefined;
-
-function displayDatabase(database: string): string {
-    return database || NO_DEFAULT_DATABASE;
-}
 
 /** Loose typing for tree items the manifest menus hand us. */
 interface ServerNodeLike {
@@ -356,9 +351,9 @@ function installStatusBar(
     const timer = setInterval(() => {
         const connected = registry.listConnectedConfigs();
         const first = connected[0];
-        item.text = first ? `$(database) ${first.name} · ${displayDatabase(first.database)}` : '$(circle-outline) No connection';
+        item.text = first ? `$(database) ${first.name}` : '$(circle-outline) No connection';
         item.tooltip = first
-            ? `${first.user}@${first.host}:${first.port}/${displayDatabase(first.database)}`
+            ? `${first.user}@${first.host}:${first.port}`
             : 'No MySQL server is connected';
     }, STATUS_BAR_REFRESH_MS);
     timer.unref();
@@ -387,7 +382,7 @@ async function pickIdleServer(
     if (all.length === 1) return all[0];
     const picks = all.map((c) => ({
         label: c.name,
-        description: `${c.host}/${displayDatabase(c.database)}`,
+        description: `${c.host}`,
         config: c,
     }));
     const chosen = await vscode.window.showQuickPick(picks, {
@@ -408,7 +403,7 @@ async function pickConnectedServer(
     if (all.length === 1) return all[0];
     const picks = all.map((c) => ({
         label: c.name,
-        description: `${c.host}/${displayDatabase(c.database)}`,
+        description: `${c.host}`,
         config: c,
     }));
     const chosen = await vscode.window.showQuickPick(picks, {
@@ -428,7 +423,7 @@ async function pickAnyServer(
     if (all.length === 1) return all[0];
     const picks = all.map((c) => ({
         label: c.name,
-        description: `${c.host}/${displayDatabase(c.database)}`,
+        description: `${c.host}`,
         config: c,
     }));
     const chosen = await vscode.window.showQuickPick(picks, {

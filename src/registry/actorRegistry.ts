@@ -440,7 +440,15 @@ export class ActorRegistry {
             host: config.host,
             port: config.port,
             user: config.user,
-            database: config.database,
+            // drop-default-database T1: `ConnectionConfig.database` was
+            // removed. `DatabaseSessionConfig.database` is still required
+            // (the mysql2 pool factory at `databaseSession.ts:380`
+            // remains untouched in this commit; a follow-up todo can
+            // drop the field from `DatabaseSessionConfig` and remove
+            // this `''` literal). Until then we pass an empty string
+            // for the default-schema slot, which is what the field's
+            // absence semantically means.
+            database: '',
             ssl: config.ssl,
             token,
         };

@@ -21,7 +21,6 @@ export function makeConnectionConfig(
         name: `Test DB ${counter}`,
         host: 'example.mysql.database.azure.com',
         port: 3306,
-        database: 'appdb',
         user: 'me@example.com',
         ssl: true,
         // readOnly is opt-in per the design choice: default off, never

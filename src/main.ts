@@ -13,7 +13,7 @@ import * as vscode from 'vscode';
 import {
     GlobalStateConnectionCatalog,
     coerceReadOnly,
-    stripReadOnly,
+    stripPersistedFields,
 } from './registry/connectionCatalog';
 import { ActorRegistry } from './registry/actorRegistry';
 import { ServerTree, WelcomeNode } from './views/connectionExplorer';
@@ -97,16 +97,31 @@ export function activate(context: vscode.ExtensionContext): void {
                     ).list().connections;
                     if (raw.length === 0) return;
                     const coerced = raw.map(coerceReadOnly);
-                    const stripped = coerced.map(stripReadOnly);
-                    // Rewrite when any persisted record still carries a
-                    // legacy `readOnly` key (true OR false) on disk —
-                    // stripReadOnly removes the key, so an entry whose
-                    // disk shape carries `readOnly` will differ from
-                    // the stripped normalised shape. This also catches
-                    // entries whose coerced value differs from the
-                    // parsed record for any other reason.
+                    // stripPersistedFields drops both `readOnly` (kept
+                    // only in memory) and the legacy `database` field
+                    // (no longer part of the connection profile at
+                    // all). The runtime kept `readOnly` as a domain
+                    // type member; the previous release added
+                    // `database: z.string().optional()` to the zod
+                    // schema, and this drop-default-database release
+                    // finishes that work — `database` is gone from the
+                    // schema, so any record still carrying it on disk
+                    // is rewritten here to drop it.
+                    const stripped = coerced.map(stripPersistedFields);
+                    // Rewrite when any persisted record still carries
+                    // either `readOnly` (true OR false) or `database`
+                    // (any string, including '') on disk —
+                    // stripPersistedFields removes both keys, so an
+                    // entry whose disk shape carries either one will
+                    // differ from the stripped normalised shape. Also
+                    // catches coerced records whose in-memory value
+                    // differs from the parsed record for any other
+                    // reason.
                     const rewritten = raw.some(
-                        (r, i) => 'readOnly' in r || r !== stripped[i]
+                        (r, i) =>
+                            'readOnly' in r ||
+                            'database' in r ||
+                            r !== stripped[i]
                     );
                     if (rewritten) {
                         await ctx.globalState.update('connections', stripped);

@@ -13,6 +13,14 @@
  *     re-persists a value the user can toggle.
  *   - `forgetServer(id)` removes both the connection record and the
  *     per-server `mysqlAzureAuth.queryHistory.<id>` key.
+ *
+ * drop-default-database T1: the optional `database` field is REMOVED from
+ * the parsed shape entirely. Profiles persisted by older releases may
+ * still carry `database: 'appdb'`; the v1 migration step in `main.ts`
+ * rewrites those records to drop the field. `parseStoredConnections`
+ * rejects (treats as missing) any persisted record that still carries a
+ * `database` key — a no-op for the typical user, but a fast-fail for the
+ * edge case where a downgrade / external edit reintroduced the field.
  */
 
 import type { ExtensionContext } from 'vscode';
@@ -25,14 +33,6 @@ const connectionSchema = z.object({
     name: z.string().min(1),
     host: z.string().min(1),
     port: z.number().int().min(1).max(65535),
-    // `database` is optional: a saved connection may omit it when the user
-    // wants to query any database the principal has access to. The zod
-    // schema accepts both `undefined` (field absent) and any string
-    // (including `''`). `parseStoredConnections` then normalises
-    // `undefined` to `''` so the in-memory `ConnectionConfig` value
-    // (which is typed `string`, not `string | undefined`) is uniform
-    // across every read site.
-    database: z.string().optional(),
     user: z.string().min(1),
     ssl: z.boolean(),
     // Optional for backward compatibility with profiles saved before
@@ -66,16 +66,14 @@ export function parseStoredConnections(value: unknown): ParseResult {
         );
         return { connections: [], problems };
     }
-    // Single-point coercion: empty-or-missing `database` is normalised to
-    // a single falsy value so downstream consumers (tree view, quickpick,
-    // session wrapper) can render `${config.database ? config.database : '(no default database)'}`
-    // without splitting on `''` vs `undefined`. The domain type keeps
-    // `database: string` (non-optional) per design, so the value here is
-    // always a string — `''` for the "no default database" state.
-    const connections: readonly ConnectionConfig[] = result.data.map((entry) => ({
-        ...entry,
-        database: entry.database ?? '',
-    }));
+    // The `database` field is no longer part of the parsed shape. The
+    // caller is expected to have already run the v1 migration step
+    // (see `src/main.ts`) which rewrites legacy persisted records to
+    // drop `database`; if a stray record still carries it (eg. because
+    // the user downgraded), zod rejects it above.
+    const connections: readonly ConnectionConfig[] = result.data.map(
+        (entry) => ({ ...entry })
+    );
     return { connections, problems: [] };
 }
 
@@ -131,7 +129,7 @@ export class GlobalStateConnectionCatalog {
             // synchronous.
             void this.context.globalState.update(
                 CONNECTIONS_STORAGE_KEY,
-                coerced.map(stripReadOnly)
+                coerced.map(stripPersistedFields)
             );
             this.onChanged?.();
         }
@@ -143,7 +141,7 @@ export class GlobalStateConnectionCatalog {
         const next = [...current, coerceReadOnly(config)];
         await this.context.globalState.update(
             CONNECTIONS_STORAGE_KEY,
-            next.map(stripReadOnly)
+            next.map(stripPersistedFields)
         );
         this.onChanged?.();
     }
@@ -156,7 +154,7 @@ export class GlobalStateConnectionCatalog {
         next[index] = coerceReadOnly(config);
         await this.context.globalState.update(
             CONNECTIONS_STORAGE_KEY,
-            next.map(stripReadOnly)
+            next.map(stripPersistedFields)
         );
         this.onChanged?.();
     }
@@ -166,7 +164,7 @@ export class GlobalStateConnectionCatalog {
         const next = current.filter((c) => c.id !== id);
         await this.context.globalState.update(
             CONNECTIONS_STORAGE_KEY,
-            next.map(stripReadOnly)
+            next.map(stripPersistedFields)
         );
         this.onChanged?.();
     }
@@ -184,7 +182,7 @@ export class GlobalStateConnectionCatalog {
     async replaceAll(connections: readonly ConnectionConfig[]): Promise<void> {
         const normalized = connections.map(coerceReadOnly);
         const result = storedConnectionsSchema.safeParse(
-            normalized.map(stripReadOnly)
+            normalized.map(stripPersistedFields)
         );
         if (!result.success) {
             throw new Error(
@@ -201,21 +199,30 @@ export class GlobalStateConnectionCatalog {
  * legacy records with `readOnly: false` (or missing) collapse to
  * `readOnly: false` to enable the new opt-in default. Records that
  * explicitly carried `readOnly: true` retain it. The disk shape is
- * stripped separately by `stripReadOnly`; this helper only normalises
- * the in-memory value.
+ * stripped separately by `stripPersistedFields`; this helper only
+ * normalises the in-memory value.
  */
 export function coerceReadOnly(config: ConnectionConfig): ConnectionConfig {
     return { ...config, readOnly: config.readOnly === true };
 }
 
 /**
- * Strip the `readOnly` field from the persisted shape. The runtime keeps
- * it in memory (because `ConnectionConfig.readOnly` is still part of the
- * domain type) but it is no longer round-tripped through `globalState`.
+ * Strip a set of fields that the connection profile no longer
+ * round-trips through `globalState`. Today the runtime keeps
+ * `readOnly` in memory (because `ConnectionConfig.readOnly` is still
+ * part of the domain type) but it is no longer persisted. The legacy
+ * `database` field is stripped unconditionally — records persisted by
+ * older releases may carry it; new records never do.
  */
-export function stripReadOnly(config: ConnectionConfig): ConnectionConfig {
-    const { readOnly: _drop, ...rest } = config;
-    void _drop;
+export function stripPersistedFields(
+    config: ConnectionConfig
+): ConnectionConfig {
+    const { readOnly: _dropReadOnly, database: _dropDatabase, ...rest } =
+        config as ConnectionConfig & {
+            readonly database?: string | undefined;
+        };
+    void _dropReadOnly;
+    void _dropDatabase;
     return rest;
 }
 

@@ -18,6 +18,11 @@ const CACHE_TTL_MS = 60_000;
 const REFRESH_INTERVAL_MS = 2_000;
 const DEFAULT_ROW_COUNT_LIMIT = 50;
 const README_URL = 'https://github.com/your-org/mysql-azure-auth#readme';
+const NO_DEFAULT_DATABASE = '(no default database)';
+
+function displayDatabase(database: string): string {
+    return database || NO_DEFAULT_DATABASE;
+}
 
 type WelcomeAction = 'register' | 'readme';
 type DisposableLike = { readonly dispose: () => void };
@@ -60,9 +65,9 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
         const item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
         const config = firstConnectedConfig(registry);
         const roTag = config?.readOnly ? ' · RO' : '';
-        item.text = config ? `🟢 ${config.name} · ${config.database}${roTag}` : '○ No connection';
+        item.text = config ? `🟢 ${config.name} · ${displayDatabase(config.database)}${roTag}` : '○ No connection';
         item.tooltip = config
-            ? `${config.user}@${config.host}:${config.port}/${config.database}${config.readOnly ? ' (read-only)' : ''}`
+            ? `${config.user}@${config.host}:${config.port}/${displayDatabase(config.database)}${config.readOnly ? ' (read-only)' : ''}`
             : 'No MySQL server is connected';
         item.show();
         return item;
@@ -124,7 +129,7 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
             if (databases.length > 0 && cache.databases.length === 0) {
                 const tables = await this.readerFor(server.config.id).listTables();
                 return tables.map(
-                    (table) => new TableNode(table, server.config.id, server.config.database)
+                    (table) => new TableNode(table, server.config.id, displayDatabase(server.config.database))
                 );
             }
         }
@@ -282,8 +287,8 @@ export class ServerNode extends vscode.TreeItem {
         // Append an RO badge so the read-only state is visible at a glance
         // next to the host/database description.
         const roSuffix = config.readOnly ? ' · RO' : '';
-        this.description = `${config.host}/${config.database}${roSuffix}`;
-        this.tooltip = `${config.user}@${config.host}:${config.port}/${config.database}${config.readOnly ? ' (read-only)' : ''}`;
+        this.description = `${config.host}/${displayDatabase(config.database)}${roSuffix}`;
+        this.tooltip = `${config.user}@${config.host}:${config.port}/${displayDatabase(config.database)}${config.readOnly ? ' (read-only)' : ''}`;
         this.contextValue = isLive ? 'server-live' : 'server-idle';
         this.iconPath = hasError
             ? new vscode.ThemeIcon('error', new vscode.ThemeColor('errorForeground'))

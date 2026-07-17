@@ -214,7 +214,7 @@ export const extensionContext: MockExtensionContext = {
         extensionUri: extensionUriStub,
         extensionPath: '/tmp/test',
         isActive: true,
-        packageJSON: {},
+        packageJSON: { version: '0.1.2' },
         exports: {},
         activate: async () => undefined,
     },
@@ -476,6 +476,8 @@ export const __test__ = {
         globalState.clear();
         subscriptions.length = 0;
         window[queueKey] = [];
+        extensionContext.extension.packageJSON = { version: '0.1.2' };
+        extensionContext.extensionMode = 1;
     },
 
     resetAuth() {
@@ -491,5 +493,37 @@ export const __test__ = {
     },
     getSessionCalls() {
         return getSessionCalls;
+    },
+
+    /**
+     * Override the extension's observed version. Pass `null` /
+     * `undefined` to simulate a missing or malformed `packageJSON`
+     * version field. Mirrors `package.json#version` in tests.
+     */
+    setPackageJsonVersion(v: string | null | undefined): void {
+        const obj = extensionContext.extension.packageJSON as Record<string, unknown>;
+        if (v === null || v === undefined) {
+            // The shape stays compatible with `context.extension.packageJSON`
+            // being a `Record<string, unknown>`; the version key is simply
+            // absent, mirroring how the real host exposes a missing version.
+            if ('version' in obj) delete obj.version;
+        } else {
+            obj.version = v;
+        }
+    },
+    resetPackageJsonVersion(): void {
+        extensionContext.extension.packageJSON = { version: '0.1.2' };
+    },
+
+    /**
+     * Override `context.extensionMode`. The numeric values match the
+     * real `vscode.ExtensionMode` enum: 1 = Production, 2 = Development,
+     * 3 = Test. The mock defaults to 1 (Production).
+     */
+    setExtensionMode(v: 1 | 2 | 3): void {
+        extensionContext.extensionMode = v;
+    },
+    resetExtensionMode(): void {
+        extensionContext.extensionMode = 1;
     },
 };

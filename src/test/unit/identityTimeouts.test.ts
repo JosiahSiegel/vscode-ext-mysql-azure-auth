@@ -23,14 +23,23 @@ suite('identityTimeouts', () => {
         assert.strictEqual(err.name, 'IdentityPromptTimeoutError');
     });
 
-    test('IdentityPromptTimeoutError.message is the literal user-facing string', () => {
+    test('IdentityPromptTimeoutError.message derives from timeoutMs (default constant)', () => {
         const err = new IdentityPromptTimeoutError(IDENTITY_PROMPT_TIMEOUT_MS);
-        assert.strictEqual(err.message, 'Identity prompt timed out after 120 seconds.');
+        assert.strictEqual(
+            err.message,
+            `Identity prompt timed out after ${IDENTITY_PROMPT_TIMEOUT_MS / 1_000} seconds.`,
+        );
+    });
+
+    test('IdentityPromptTimeoutError.message reflects the actual timeoutMs argument', () => {
+        const err = new IdentityPromptTimeoutError(60_000);
+        assert.strictEqual(err.message, 'Identity prompt timed out after 60 seconds.');
     });
 
     test('IdentityPromptTimeoutError preserves the timeoutMs it was constructed with', () => {
         const err = new IdentityPromptTimeoutError(IDENTITY_PROMPT_TIMEOUT_MS);
         assert.strictEqual(err.timeoutMs, IDENTITY_PROMPT_TIMEOUT_MS);
+        assert.strictEqual(err.timeoutMs, 120_000);
     });
 
     test('IdentityPromptTimeoutError is an instance of Error for try/catch interop', () => {

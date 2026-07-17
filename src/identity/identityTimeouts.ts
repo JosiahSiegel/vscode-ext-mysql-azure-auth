@@ -30,6 +30,6 @@ export class IdentityPromptTimeoutError extends Error {
     override readonly name = 'IdentityPromptTimeoutError';
 
     constructor(readonly timeoutMs: number) {
-        super('Identity prompt timed out after 120 seconds.');
+        super(`Identity prompt timed out after ${timeoutMs / 1_000} seconds.`);
     }
 }

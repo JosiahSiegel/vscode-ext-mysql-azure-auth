@@ -3,7 +3,7 @@
  *
  * The port exposes ONLY what the rest of the extension needs:
  *   - execute(sql) -> QueryOutcome  (discriminated union, no stringly-typed errors)
- *   - listDatabases() / listTables() / listColumns(table)
+ *   - listDatabases() / listTables(database?) / listColumns(database, table)
  *   - end() -> Promise<void>
  *
  * Internally each session owns an `mysql.Pool` and an `authPlugins` closure
@@ -288,8 +288,26 @@ export class DatabaseSession {
         return output.rows.map((row) => String(Object.values(row)[0] ?? ''));
     }
 
-    async listColumns(tableName: string): Promise<{ name: string; type: string }[]> {
-        const outcome = await this.execute(`DESCRIBE \`${escapeSqlIdentifier(tableName)}\``);
+    /**
+     * Describe a table's columns.
+     *
+     * `database` is the scope in which the table lives. When `database` is
+     * non-empty the call emits `DESCRIBE \`db\`.\`tbl\`` so it resolves
+     * against that schema regardless of the connection's default DB; this
+     * is the path used when expanding a `TableNode` whose node was built
+     * from a real `DatabaseNode` and the connection has no default DB
+     * (the friendly-defaults configuration introduced by the
+     * drop-default-database plan).
+     *
+     * When `database` is undefined or empty, the call falls back to the
+     * single-identifier form `DESCRIBE \`tbl\`` which resolves against
+     * the connection's default DB.
+     */
+    async listColumns(database: string | undefined, tableName: string): Promise<{ name: string; type: string }[]> {
+        const sql = database && database.length > 0
+            ? `DESCRIBE \`${escapeSqlIdentifier(database)}\`.\`${escapeSqlIdentifier(tableName)}\``
+            : `DESCRIBE \`${escapeSqlIdentifier(tableName)}\``;
+        const outcome = await this.execute(sql);
         if (outcome.tag === 'err') {
             throw new QueryProblemError(
                 problemMessage(outcome.problem),

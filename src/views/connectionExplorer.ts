@@ -150,7 +150,7 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
         const key = schemaKey(table.databaseName, table.tableName);
         let columns = cache.columns.get(key);
         if (columns === undefined) {
-            columns = await this.readerFor(table.connectionId).listColumns(table.tableName);
+            columns = await this.readerFor(table.connectionId).listColumns(table.databaseName, table.tableName);
             cache.columns.set(key, columns);
         }
         return columns.map((column) => new ColumnNode(column));

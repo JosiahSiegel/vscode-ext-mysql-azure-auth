@@ -39,9 +39,9 @@ export class CatalogReader {
         return session.listTables(database);
     }
 
-    async listColumns(tableName: string): Promise<ColumnInfo[]> {
+    async listColumns(database: string | undefined, tableName: string): Promise<ColumnInfo[]> {
         const session = this.getSession();
         if (!session) throw new Error('Not connected');
-        return session.listColumns(tableName);
+        return session.listColumns(database, tableName);
     }
 }

@@ -325,7 +325,7 @@ export class QueryWorkbench {
         try {
             const tables = await this.getCachedTables();
             const tableMatch = /\b(?:FROM|JOIN)\s+[`"]?([\w$-]+)[`"]?/i.exec(sql);
-            const columns = tableMatch?.[1] ? await this.catalogReader.listColumns(tableMatch[1]) : [];
+            const columns = tableMatch?.[1] ? await this.catalogReader.listColumns(undefined, tableMatch[1]) : [];
             const candidates = [...tables, ...columns.map((column) => column.name)];
             const normalized = prefix.toLocaleLowerCase();
             this.postMessage({

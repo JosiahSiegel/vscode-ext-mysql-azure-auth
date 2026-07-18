@@ -238,7 +238,7 @@ export class ActorRegistry {
 
     async getTableColumns(id: string, tableName: string): Promise<TableColumn[]> {
         const actor = this.requireActor(id);
-        return this.enqueue(actor, async () => this.requireSession(id).listColumns(tableName));
+        return this.enqueue(actor, async () => this.requireSession(id).listColumns(undefined, tableName));
     }
 
     /** Disconnect every actor. Awaited; safe to call from deactivate(). */

@@ -115,7 +115,6 @@ suite('Public surface lock', () => {
         const properties = pkg.contributes.configuration.properties;
         const expectedKeys = [
             'mysqlAzureAuth.historyLimit',
-            'mysqlAzureAuth.showRowCounts',
             'mysqlAzureAuth.enableStatusBar',
         ];
         for (const key of expectedKeys) {

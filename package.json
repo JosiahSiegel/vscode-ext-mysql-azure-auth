@@ -171,11 +171,6 @@
           "maximum": 10000,
           "description": "Number of queries kept in per-server history"
         },
-        "mysqlAzureAuth.showRowCounts": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show row counts in the Servers tree"
-        },
         "mysqlAzureAuth.enableStatusBar": {
           "type": "boolean",
           "default": true,

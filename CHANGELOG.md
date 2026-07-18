@@ -39,13 +39,14 @@ Preview suffix for pre-stable releases.
 ### Removed
 
 - The optional "Default database" field on the connection form and wizard. New profiles are saved with no default schema; legacy profiles' stored `database` strings are stripped on next activation by the existing v1 migration step. Queries are now schema-qualified (`SELECT * FROM mydb.users LIMIT 50`) or scoped by clicking a database in the tree.
+- Per-table row counts in the Servers tree — the description field on `TableNode` no longer renders `${formatCount(count)} rows` or `? rows`. The `mysqlAzureAuth.showRowCounts` configuration setting is also removed. Users who need exact row counts should run `SELECT COUNT(*) FROM \`db\`.\`tbl\`` from the Query Workbench; the tree remains purely structural.
 
 ### Changed
 
 - The Server tree status-bar tooltip no longer includes a `/database` segment (e.g., `user@host:port (read-only)`).
 - The Quickpick command palette entries no longer include the `/database` segment in their descriptions.
 - The Query Workbench status bar no longer renders the `Database:` pill.
-- The server explorer's row-count loader now bounds each `SELECT COUNT(*)` query with a 5-second timeout, and a failed count no longer caches `undefined` permanently. Sequential database expansion on the same connection (e.g., opening DB-A to view tables, then opening DB-B) no longer hangs on a slow or transient count failure. Covered by `src/test/unit/connectionTreeDatabaseExpand.test.ts`.
+- The server explorer no longer issues `SELECT COUNT(*)` per table on database expand. Row counts are removed from the tree entirely (was: 5-second per-count timeout in the prior 0.2.1 release). New regression test: `src/test/unit/connectionTreeNoCountQueries.test.ts`.
 
 ### Honest disclosures
 

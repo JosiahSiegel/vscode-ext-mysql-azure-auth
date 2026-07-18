@@ -167,6 +167,41 @@ suite('buildQueryWorkbenchHtml', () => {
         }, 'inline webview script must parse as valid JavaScript in read-only mode');
     });
 
+    test('renderVirtual does not assign table.style.transform so the sticky th stays pinned under scroll', () => {
+        // Regression: renderVirtual used to set table.style.transform = 'translateY(start*ROW_HEIGHT)px'.
+        // The inner table is rendered inside a .table-scroll viewport, and the result <th> is
+        // position:sticky with top:0. A transform on the <table> creates a containing block for
+        // fixed/sticky descendants that is *the table itself* — so the sticky <th> ends up pinned
+        // to the top of the off-screen translated <table>, not to the viewport, and the column
+        // headers drift past the user as they scroll large result sets. The minimal GREEN is to
+        // drive the offset via table.style.top instead, which leaves the sticky <th> pinned to
+        // the .table-scroll viewport as designed.
+        //
+        // This test locks the contract from both sides:
+        //   1. The renderVirtual source must NOT touch table.style.transform — that assignment
+        //      is what caused the sticky-drift in the first place.
+        //   2. The result <th> must still carry position:sticky in the inline <style> block so
+        //      switching the offset mechanism does not silently drop the header pin.
+        const html = buildQueryWorkbenchHtml({ nonce: 'test-nonce', serverName: 'production' });
+        const script = extractInlineScript(html);
+
+        // Given the inline webview script and the rendered workbench HTML
+        // When renderVirtual sets the row offset on its inner <table>
+        // Then it must use table.style.top (or another non-transform property) instead of
+        //      table.style.transform, so the sticky <th> stays anchored to the viewport.
+        assert.ok(
+            !/table\.style\.transform\s*=/.test(script),
+            'renderVirtual must not assign table.style.transform — transforms create a containing ' +
+                'block that breaks the position:sticky <th> in result tables. Drive the offset ' +
+                'with table.style.top instead.'
+        );
+        // And the sticky <th> contract from the inline <style> block must survive the change.
+        assert.ok(
+            /th\s*\{\s*position\s*:\s*sticky/.test(html),
+            'inline <style> must keep position:sticky on result <th> so the header row stays pinned'
+        );
+    });
+
     test('does not render the Database: pill after the default-database field is dropped', () => {
         // Regression: drop-default-database T3 removed the
         // `<span id="database">Database: ...</span>` pill entirely so the

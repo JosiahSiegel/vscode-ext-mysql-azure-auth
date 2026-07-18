@@ -46,9 +46,9 @@ Each record carries exactly the following fields:
 | `name`     | Display label picked by the user                    |
 | `host`     | Server hostname                                      |
 | `port`     | TCP port (1..65535)                                  |
-| `database` | Default schema                                       |
 | `user`     | Entra principal (UPN / email / group name)           |
 | `ssl`      | Whether TLS is required on this connection           |
+| `readOnly` | Whether the user opted in to read-only session mode |
 
 Secrets are NOT stored:
 

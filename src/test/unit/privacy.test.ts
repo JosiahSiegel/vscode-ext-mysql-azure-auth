@@ -206,33 +206,116 @@ suite('privacy', () => {
         assert.strictEqual(coerceReadOnly(makeBaseConfig()).readOnly, false);
     });
 
-    test('stripPersistedFields drops the readOnly field from the persisted shape', () => {
-        const withField = makeBaseConfig({ readOnly: false });
-        const stripped = stripPersistedFields(withField);
-        assert.strictEqual('readOnly' in stripped, false);
-        // The live value still carries it for runtime read-only enforcement.
-        assert.strictEqual(withField.readOnly, false);
+    test('a checked readOnly preference survives GlobalStateConnectionCatalog save/reload', async () => {
+        // Regression: the user explicitly checked "Open session in
+        // read-only mode" on the connection form. That preference must
+        // survive a save → fresh-catalog → list() round-trip through
+        // globalState. Today it does NOT — `stripPersistedFields`
+        // drops `readOnly` from the persisted shape, and `catalog.list()`
+        // returns a record whose `readOnly` is missing (i.e. not
+        // `true`). This test pins the desired behaviour so the fix
+        // can be locked by a green.
+        __test__.reset();
+        try {
+            const ctx =
+                extensionContext as unknown as Pick<ExtensionContext, 'globalState'>;
+
+            const catalog = new GlobalStateConnectionCatalog(ctx);
+            await catalog.add(
+                makeBaseConfig({ id: 'cfg-readonly-roundtrip', readOnly: true })
+            );
+
+            // Simulate a fresh extension activation: a new catalog
+            // instance reading from the same globalState.
+            const reloaded = new GlobalStateConnectionCatalog(ctx);
+            const { connections, problems } = reloaded.list();
+            assert.strictEqual(
+                problems.length,
+                0,
+                `reloaded catalog reported parse problems: ${problems.join(' | ')}`
+            );
+            assert.strictEqual(connections.length, 1);
+            const reloadedConfig = connections[0];
+            assert.ok(reloadedConfig, 'reloaded connections should have one entry');
+            assert.strictEqual(
+                reloadedConfig.id,
+                'cfg-readonly-roundtrip'
+            );
+            // The checked readOnly preference MUST survive the round-trip.
+            assert.strictEqual(
+                reloadedConfig.readOnly,
+                true,
+                `readOnly preference was lost across catalog save/reload; ` +
+                    `got ${JSON.stringify(reloadedConfig)}`
+            );
+
+            // And the persisted shape on disk must also carry the
+            // user-set flag — otherwise a downgrade / external read
+            // could regress the user's choice.
+            const persisted = ctx.globalState.get('connections') as
+                | Array<Record<string, unknown>>
+                | undefined;
+            assert.ok(
+                Array.isArray(persisted) && persisted.length === 1,
+                `expected one persisted record; got: ${JSON.stringify(persisted)}`
+            );
+            const persistedRecord = persisted[0];
+            assert.ok(persistedRecord, 'persisted record should exist');
+            assert.strictEqual(
+                persistedRecord.readOnly,
+                true,
+                `persisted record dropped readOnly; got: ${JSON.stringify(persistedRecord)}`
+            );
+        } finally {
+            __test__.reset();
+        }
     });
 
-    test('loadOrMigrateTestShim coerces stored readOnly and strips the field on disk', async () => {
+    test('stripPersistedFields preserves readOnly and drops only the legacy database field', () => {
+        // Todo 6 flipped the policy: `readOnly` is now legitimate
+        // persisted data — the user's opt-in preference must
+        // round-trip through `globalState` so a fresh-catalog
+        // rehydration does not silently downgrade their choice. The
+        // legacy `database` field is the only field stripped today.
+        const withReadOnly = makeBaseConfig({ readOnly: true });
+        const stripped = stripPersistedFields(withReadOnly);
+        assert.strictEqual('readOnly' in stripped, true);
+        assert.strictEqual(stripped.readOnly, true);
+        // The legacy `database` field is stripped (records persisted
+        // by older releases may carry it; new records never do).
+        const withLegacyDatabase = {
+            ...makeBaseConfig({ readOnly: true }),
+            database: 'appdb',
+        } as ConnectionConfig & { readonly database?: string };
+        const strippedLegacy = stripPersistedFields(withLegacyDatabase);
+        assert.strictEqual('database' in strippedLegacy, false);
+    });
+
+    test('loadOrMigrateTestShim coerces stored readOnly and preserves it on disk', async () => {
         __test__.reset();
         const ctx = extensionContext as unknown as Pick<ExtensionContext, 'globalState'>;
-        // Legacy payload with `readOnly: false` (pre-Todo 6 default).
+        // Legacy payload with `readOnly: true` (pre-Todo 6 user opt-in).
         await ctx.globalState.update('connections', [
-            { ...makeBaseConfig({ id: 'cfg-legacy' }), readOnly: false },
+            { ...makeBaseConfig({ id: 'cfg-legacy' }), readOnly: true },
         ]);
         const catalog = new GlobalStateConnectionCatalog(ctx);
         const coerced = loadOrMigrateTestShim(catalog);
         assert.strictEqual(coerced.length, 1);
         assert.ok(coerced[0]);
-        // Todo 6: legacy `readOnly: false` collapses to `false` (opt-in default).
-        assert.strictEqual(coerced[0].readOnly, false);
+        // Todo 6: the user's opt-in preference is honoured end-to-end.
+        assert.strictEqual(coerced[0].readOnly, true);
         const persisted = ctx.globalState.get('connections') as Array<Record<string, unknown>>;
         assert.ok(persisted);
         assert.strictEqual(persisted.length, 1);
         const first = persisted[0];
         assert.ok(first);
-        assert.strictEqual('readOnly' in first, false);
+        // `readOnly` IS persisted — the field must round-trip through
+        // `globalState` so a fresh-catalog rehydration does not lose
+        // the user's choice.
+        assert.strictEqual('readOnly' in first, true);
+        assert.strictEqual(first.readOnly, true);
+        // The legacy `database` field, if present, must be stripped.
+        assert.strictEqual('database' in first, false);
 
         __test__.reset();
     });

@@ -34,6 +34,13 @@ Preview suffix for pre-stable releases.
 - The 120s identity prompt timeout applies to both the initial sign-in (via VS Code's Microsoft auth provider) and the periodic 45-minute refresh. The timeout is a compile-time constant and not a user setting; changing it requires an edit to `src/identity/vscodeAuth.ts` and a rebuild.
 - When a connection has no default database configured, the Query Workbench status bar shows `Database: (none)` instead of `Database: current` — this is a label update only; queries still need to be schema-qualified to succeed.
 
+## 0.2.3-Preview (unreleased)
+
+### Fixed
+
+- **Edit-server read-only checkbox now persists.** `GlobalStateConnectionCatalog.stripPersistedFields` previously destructured `readOnly` out of every persisted record, so any session the user opened with the read-only opt-in appeared unchecked the next time they reopened the Edit Server dialog. The catalog now keeps `readOnly` and only strips the legacy `database` field. The v1 migration trigger no longer treats `readOnly` as a legacy key to rewrite on every activation. The persisted-fields disclosure in `docs/PRIVACY.md` is updated to match. Round-trip coverage added in `src/test/unit/privacy.test.ts`; the two contract tests that previously asserted the dropped shape have been flipped.
+- **Query Workbench result column headers are now fixed.** The virtualized result table used `transform: translateY(...)` on the `<table class="virtual-table">` that contained the sticky `<th>` row, which made the transformed table the sticky containing block. Headers visibly drifted down across the data rows during scroll. The renderer now drives the row offset via `table.style.top`, so the existing `position: sticky` on `<th>` correctly pins to the `.table-scroll` viewport. Sticky-header coverage added in `src/test/unit/queryWorkbenchHtml.test.ts`.
+
 ## 0.2.2-Preview (unreleased)
 
 ### Fixed

@@ -8,9 +8,11 @@
  * tree view and the commands consume the Repository, not globalState.
  *
  * Todo 6 privacy:
- *   - legacy `readOnly` flags are honoured as the user set them; the
- *     runtime keeps the field in memory but the catalog never
- *     re-persists a value the user can toggle.
+ *   - the user's `readOnly` opt-in is persisted end-to-end: a checked
+ *     checkbox survives `catalog.add()` → fresh `catalog.list()` and
+ *     rehydrates the edit-form. `stripPersistedFields` only removes
+ *     the legacy `database` field — `readOnly` round-trips through
+ *     `globalState`.
  *   - `forgetServer(id)` removes both the connection record and the
  *     per-server `mysqlAzureAuth.queryHistory.<id>` key.
  *
@@ -36,9 +38,10 @@ const connectionSchema = z.object({
     user: z.string().min(1),
     ssl: z.boolean(),
     // Optional for backward compatibility with profiles saved before
-    // read-only mode was added. Missing values default to false at parse
-    // time, then `loadOrMigrate()` rewrites them to `true` before they
-    // reach the runtime.
+    // read-only mode was added. The persisted value is honoured as
+    // the user set it (Todo 6); missing values default to `false` at
+    // parse time and `loadOrMigrate()` runs `coerceReadOnly()` so the
+    // opt-in preference is preserved end-to-end.
     readOnly: z.boolean().optional(),
 });
 
@@ -95,9 +98,10 @@ export function queryHistoryKey(connectionId: string): string {
  * underlying memento.
  *
  * Todo 5 also adds a `loadOrMigrate()` helper that returns the live list
- * of coerced records, eagerly rewrites the persisted array to drop the
- * `readOnly` field, and removes any per-server `mysqlAzureAuth.queryHistory.<id>`
- * key when called via `forgetServer(id)`.
+ * of coerced records and eagerly rewrites the persisted array to drop
+ * the legacy `database` field (the `readOnly` flag IS preserved end-to-end).
+ * `forgetServer(id)` removes any per-server `mysqlAzureAuth.queryHistory.<id>`
+ * key in the same atomic step.
  */
 export class GlobalStateConnectionCatalog {
     constructor(
@@ -111,9 +115,11 @@ export class GlobalStateConnectionCatalog {
     }
 
     /**
-     * Read the stored list, coerce every record's `readOnly` flag to
-     * `true`, and persist the rewritten list if any record carried a
-     * writable value. Returns the coerced records so callers see the
+     * Read the stored list, normalise every record's `readOnly` flag via
+     * `coerceReadOnly()` (Todo 6: honour the user's opt-in), and persist
+     * the rewritten list if any record still carries the legacy
+     * `database` field on disk or otherwise differs from the normalised
+     * shape. Returns the coerced records so callers see the
      * post-migration state.
      */
     loadOrMigrate(): readonly ConnectionConfig[] {
@@ -200,7 +206,8 @@ export class GlobalStateConnectionCatalog {
  * `readOnly: false` to enable the new opt-in default. Records that
  * explicitly carried `readOnly: true` retain it. The disk shape is
  * stripped separately by `stripPersistedFields`; this helper only
- * normalises the in-memory value.
+ * normalises the in-memory value. `readOnly` IS part of the persisted
+ * shape (only the legacy `database` field is stripped).
  */
 export function coerceReadOnly(config: ConnectionConfig): ConnectionConfig {
     return { ...config, readOnly: config.readOnly === true };
@@ -208,20 +215,19 @@ export function coerceReadOnly(config: ConnectionConfig): ConnectionConfig {
 
 /**
  * Strip a set of fields that the connection profile no longer
- * round-trips through `globalState`. Today the runtime keeps
- * `readOnly` in memory (because `ConnectionConfig.readOnly` is still
- * part of the domain type) but it is no longer persisted. The legacy
- * `database` field is stripped unconditionally — records persisted by
- * older releases may carry it; new records never do.
+ * round-trips through `globalState`. The `readOnly` flag IS persisted:
+ * the user's opt-in preference must survive a save / fresh-catalog /
+ * list() round-trip so an edit-form rehydration does not silently
+ * downgrade the user's choice. The legacy `database` field is the
+ * only field stripped today — records persisted by older releases may
+ * carry it; new records never do.
  */
 export function stripPersistedFields(
     config: ConnectionConfig
 ): ConnectionConfig {
-    const { readOnly: _dropReadOnly, database: _dropDatabase, ...rest } =
-        config as ConnectionConfig & {
-            readonly database?: string | undefined;
-        };
-    void _dropReadOnly;
+    const { database: _dropDatabase, ...rest } = config as ConnectionConfig & {
+        readonly database?: string | undefined;
+    };
     void _dropDatabase;
     return rest;
 }

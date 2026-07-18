@@ -34,6 +34,12 @@ Preview suffix for pre-stable releases.
 - The 120s identity prompt timeout applies to both the initial sign-in (via VS Code's Microsoft auth provider) and the periodic 45-minute refresh. The timeout is a compile-time constant and not a user setting; changing it requires an edit to `src/identity/vscodeAuth.ts` and a rebuild.
 - When a connection has no default database configured, the Query Workbench status bar shows `Database: (none)` instead of `Database: current` — this is a label update only; queries still need to be schema-qualified to succeed.
 
+## 0.2.2-Preview (unreleased)
+
+### Fixed
+
+- Expanding a table in the Servers tree now issues `DESCRIBE \`db\`.\`tbl\`` when the connection has no default database, instead of returning `ER_NO_DB_ERROR` surfaced as "Schema unavailable: No database selected". `DatabaseSession.listColumns` gained an optional `database` argument; `CatalogReader` and `ServerTree.getColumns` thread the table's `databaseName` through so the query is always schema-qualified when the table node was built from a real `DatabaseNode`. Covered by `src/test/unit/connectionTreeColumnsExpand.test.ts`.
+
 ## 0.2.1-Preview (unreleased)
 
 ### Removed

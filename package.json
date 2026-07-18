@@ -2,7 +2,7 @@
   "name": "mysql-azure-auth",
   "displayName": "MySQL Azure Auth",
   "description": "A community-maintained VS Code preview for browsing and querying Azure Database for MySQL Flexible Server with Microsoft Entra authentication.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "packageManager": "npm@10.8.1",
   "publisher": "JosiahSiegel",
   "license": "MIT",

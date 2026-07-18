@@ -12,27 +12,11 @@ import * as vscode from 'vscode';
 import { ActorRegistry } from '../registry/actorRegistry';
 import { CatalogReader, type ColumnInfo } from '../schema/catalogReader';
 import { GlobalStateConnectionCatalog } from '../registry/connectionCatalog';
-import type { ConnectionConfig, QueryResult } from '../domain';
+import type { ConnectionConfig } from '../domain';
 
 const CACHE_TTL_MS = 60_000;
-/** Maximum time (ms) to wait for a single SELECT COUNT(*) before giving up. */
-const COUNT_QUERY_TIMEOUT_MS = 5_000;
 const REFRESH_INTERVAL_MS = 2_000;
-const DEFAULT_ROW_COUNT_LIMIT = 50;
 const README_URL = 'https://github.com/your-org/mysql-azure-auth#readme';
-
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`Timed out after ${ms}ms: ${label}`)), ms);
-        timer.unref();
-    });
-    try {
-        return await Promise.race([promise, timeout]);
-    } finally {
-        if (timer) clearTimeout(timer);
-    }
-}
 
 type WelcomeAction = 'register' | 'readme';
 type DisposableLike = { readonly dispose: () => void };
@@ -57,7 +41,6 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
     private readonly registry: ActorRegistry;
     private readonly readerFor: (id: string) => CatalogReader;
     private readonly schemaCache = new Map<string, SchemaCache>();
-    private readonly rowCounts = new Map<string, number | undefined>();
     private readonly lastKnownState = new Map<string, boolean>();
     private readonly disposables: DisposableLike[] = [];
 
@@ -159,21 +142,7 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
             cache.tables.set(database.databaseName, tables);
         }
 
-        const rowCountsEnabled = vscode.workspace
-            .getConfiguration('mysqlAzureAuth')
-            .get<boolean>('showRowCounts', true) !== false;
-        const counts = rowCountsEnabled
-            ? await this.loadRowCounts(database.connectionId, database.databaseName, tables)
-            : new Map<string, number | undefined>();
-        return tables.map((table) =>
-            new TableNode(
-                table,
-                database.connectionId,
-                database.databaseName,
-                counts.get(table),
-                rowCountsEnabled
-            )
-        );
+        return tables.map((table) => new TableNode(table, database.connectionId, database.databaseName));
     }
 
     private async getColumns(table: TableNode): Promise<vscode.TreeItem[]> {
@@ -204,34 +173,6 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
         return created;
     }
 
-    private async loadRowCounts(
-        connectionId: string,
-        database: string,
-        tables: readonly string[]
-    ): Promise<Map<string, number | undefined>> {
-        const selected = tables.slice(0, DEFAULT_ROW_COUNT_LIMIT);
-        await Promise.all(selected.map(async (table) => {
-            const key = rowCountKey(connectionId, database, table);
-            if (this.rowCounts.has(key)) return;
-            const sql = `SELECT COUNT(*) FROM \`${escapeIdentifier(database)}\`.\`${escapeIdentifier(table)}\``;
-            try {
-                const result = await withTimeout(
-                    this.registry.executeQuery(connectionId, sql),
-                    COUNT_QUERY_TIMEOUT_MS,
-                    `count(${escapeIdentifier(database)}.${escapeIdentifier(table)})`
-                );
-                this.rowCounts.set(key, readCount(result));
-            } catch {
-                // swallow: timeout/error → do not poison rowCounts cache; next expand will retry.
-            }
-        }));
-
-        return new Map(selected.map((table) => [
-            table,
-            this.rowCounts.get(rowCountKey(connectionId, database, table)),
-        ]));
-    }
-
     private reconcileConnectionStates(): void {
         const knownIds = new Set<string>();
         for (const config of this.catalog.list().connections) {
@@ -251,10 +192,6 @@ export class ServerTree implements vscode.TreeDataProvider<vscode.TreeItem>, vsc
 
     private invalidate(connectionId: string): void {
         this.schemaCache.delete(connectionId);
-        const prefix = `${connectionId}\u0000`;
-        for (const key of this.rowCounts.keys()) {
-            if (key.startsWith(prefix)) this.rowCounts.delete(key);
-        }
     }
 }
 
@@ -334,17 +271,12 @@ export class TableNode extends vscode.TreeItem {
     constructor(
         tableName: string,
         connectionId: string,
-        databaseName = '',
-        rowCount?: number,
-        showRowCount = true
+        databaseName = ''
     ) {
         super(tableName, vscode.TreeItemCollapsibleState.Collapsed);
         this.tableName = tableName;
         this.connectionId = connectionId;
         this.databaseName = databaseName;
-        if (showRowCount) {
-            this.description = rowCount === undefined ? '? rows' : `${formatCount(rowCount)} rows`;
-        }
         this.iconPath = new vscode.ThemeIcon('table');
         this.contextValue = 'table-live';
         this.command = {
@@ -394,47 +326,14 @@ function booleanMetadata(value: object, key: string): boolean {
     return Reflect.get(value, key) === true;
 }
 
-function readCount(result: QueryResult): number | undefined {
-    if (result.error !== undefined) return undefined;
-    const row = result.rows[0];
-    if (row === undefined) return undefined;
-    const value = Object.values(row)[0];
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'bigint') return Number(value);
-    if (typeof value === 'string') {
-        const parsed = Number(value);
-        return Number.isFinite(parsed) ? parsed : undefined;
-    }
-    return undefined;
-}
-
-function formatCount(count: number): string {
-    if (count < 1_000) return count.toLocaleString();
-    if (count < 1_000_000) return `${stripTrailingZero((count / 1_000).toFixed(1))}k`;
-    if (count < 1_000_000_000) return `${stripTrailingZero((count / 1_000_000).toFixed(1))}m`;
-    return `${stripTrailingZero((count / 1_000_000_000).toFixed(1))}b`;
-}
-
-function stripTrailingZero(value: string): string {
-    return value.endsWith('.0') ? value.slice(0, -2) : value;
-}
-
 function shortError(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error ?? 'Unknown error');
     const singleLine = message.replace(/\s+/g, ' ').trim();
     return singleLine.length > 100 ? `${singleLine.slice(0, 97)}...` : singleLine;
 }
 
-function escapeIdentifier(identifier: string): string {
-    return identifier.replace(/`/g, '``');
-}
-
 function schemaKey(database: string, table: string): string {
     return `${database}\u0000${table}`;
-}
-
-function rowCountKey(connectionId: string, database: string, table: string): string {
-    return `${connectionId}\u0000${database}\u0000${table}`;
 }
 
 function firstConnectedConfig(registry: ActorRegistry): ConnectionConfig | undefined {

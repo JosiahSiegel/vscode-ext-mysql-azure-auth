@@ -4,10 +4,21 @@
  * After the row-count code path was deleted from `ServerTree.getTables()`,
  * `TableNode` is constructed with no row-count description. This test
  * locks in the new contract: **expanding a database issues zero
- * `SELECT COUNT(*)` queries** against the `ActorRegistry`.
+ * `SELECT COUNT(*)` queries** against the underlying mysql2 pool.
  *
- * If anyone ever reintroduces a `SELECT COUNT(*) FROM \`db\`.\`tbl\``
- * round-trip into the tree's database-expand path, this test must fail.
+ * The production path that gets exercised when a `DatabaseNode` is
+ * expanded is:
+ *
+ *     ServerTree.getTables
+ *       -> CatalogReader.listTables
+ *       -> DatabaseSession.listTables(database)
+ *       -> DatabaseSession.execute('SHOW TABLES FROM `db`')
+ *       -> pool.execute(sql)            // <-- the mysql2 pool surface
+ *
+ * We capture SQL at the pool surface (the same surface production uses)
+ * via the `fakeExecute` sinon stub returned by `buildTablePool`. If anyone
+ * ever reintroduces a `SELECT COUNT(*) FROM \`db\`.\`tbl\`` round-trip into
+ * the tree's database-expand path, this test must fail.
  *
  * Replaces the broader `connectionTreeDatabaseExpand.test.ts` (which
  * also covered the deleted cache-poisoning bug class). The earlier
@@ -47,8 +58,17 @@ function fakeIdentity(): { readonly getAccessToken: () => Promise<string> } {
  * Build a fake pool whose `execute` returns whatever 2-tuple the
  * caller stages. Returns the sinon stub so tests can assert on the
  * SQL strings the registry's session ultimately reaches.
+ *
+ * NOTE: `fakeExecute` is the **mysql2 pool surface** that production
+ * code calls. Capturing SQL here means we observe exactly the strings
+ * `DatabaseSession.execute()` forwards to `pool.execute()` — the same
+ * surface `ServerTree.getTables()` ultimately drives via
+ * `CatalogReader.listTables()` -> `DatabaseSession.listTables()`.
  */
-function buildTablePool(rowsByTable: ReadonlyArray<Record<string, string>>) {
+function buildTablePool(rowsByTable: ReadonlyArray<Record<string, string>>): {
+    factory: PoolFactory;
+    fakeExecute: sinon.SinonStub;
+} {
     const fakeExecute = sinon.stub().callsFake(async (sql: string) => {
         if (/^\s*SHOW\s+TABLES/i.test(sql)) {
             return [rowsByTable as unknown as never[], []] as unknown as never;
@@ -63,10 +83,10 @@ function buildTablePool(rowsByTable: ReadonlyArray<Record<string, string>>) {
 }
 
 suite('ServerTree database expand (no COUNT(*) regression)', () => {
-    let executeQueryStub: sinon.SinonStub;
     let registry: ActorRegistry;
     let catalog: GlobalStateConnectionCatalog;
     let provider: ServerTree;
+    let fakeExecute: sinon.SinonStub;
 
     setup(() => {
         __test__.reset();
@@ -89,24 +109,15 @@ suite('ServerTree database expand (no COUNT(*) regression)', () => {
             { Tables_in_appdb: 'users' },
             { Tables_in_appdb: 'orders' },
         ]);
+        fakeExecute = tablePool.fakeExecute;
         registry = new ActorRegistry({
             identity: fakeIdentity(),
             poolFactory: tablePool.factory,
         });
         provider = new ServerTree({ catalog, registry });
-
-        // Replace `executeQuery` at the prototype level so we can record every
-        // SQL string the tree sends into the registry. The real implementation
-        // is bypassed; we only need to know whether COUNT(*) is among them.
-        executeQueryStub = sinon.stub(ActorRegistry.prototype, 'executeQuery').callsFake(
-            async (_id: string, _sql: string) => {
-                return [[], []] as unknown as never;
-            }
-        );
     });
 
     teardown(() => {
-        executeQueryStub.restore();
         __test__.reset();
         __test__.resetAuth();
     });
@@ -117,12 +128,6 @@ suite('ServerTree database expand (no COUNT(*) regression)', () => {
         const cfg = makeConnectionConfig({ id: 'cfg-no-count' });
         await catalog.add(cfg);
         await registry.connect('cfg-no-count', cfg);
-
-        const recordedSql: string[] = [];
-        executeQueryStub.callsFake(async (_id: string, sql: string) => {
-            recordedSql.push(sql);
-            return [[], []] as unknown as never;
-        });
 
         const databaseNode = new DatabaseNode('appdb', 'cfg-no-count');
 
@@ -141,9 +146,12 @@ suite('ServerTree database expand (no COUNT(*) regression)', () => {
             );
         }
 
-        // 2. No recorded SQL may match the COUNT(*) pattern.
-        const countPattern = /SELECT\s+COUNT\s*\(\s*\*/i;
-        const offenders = recordedSql.filter((sql) => countPattern.test(sql));
+        // 2. No recorded SQL on the pool surface may match the COUNT(*) pattern.
+        //    `fakeExecute.getCalls()` reads the SQL strings that flowed through
+        //    `DatabaseSession.execute()` -> `pool.execute()` — the same surface
+        //    the production `getTables` path drives.
+        const allSql = fakeExecute.getCalls().map((c) => c.args[0] as string);
+        const offenders = allSql.filter((sql) => /SELECT\s+COUNT\s*\(\s*\*/i.test(sql));
         assert.strictEqual(
             offenders.length,
             0,

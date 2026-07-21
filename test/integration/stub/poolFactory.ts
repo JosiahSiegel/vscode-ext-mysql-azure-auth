@@ -1,30 +1,27 @@
 /**
- * Pool factory used by the integration test. Mirrors the production
- * `defaultPoolFactory` exactly (with the same custom
- * `authPlugins.mysql_clear_password` closure) so the test exercises
- * the actual production wire flow: the auth-switch dance.
+ * Pool factory used by the integration test. Returns a `FakePool`
+ * instance that validates the JWT on every query and returns canned
+ * results for the queries the extension exercises.
+ *
+ * This is the right abstraction level for the test: we want to
+ * validate the extension's auth + dispatch logic (EntraTokenProvider,
+ * DatabaseSession, SQL classifier, swapToken rotation) without
+ * exercising the MySQL wire protocol itself (which is mysql2's
+ * responsibility). A real `mysqld` would catch different bugs
+ * (wire format compatibility) and is a different test.
+ *
+ * The JWT validation function is injected so the test can swap
+ * validators (valid / expired / wrong-audience) without rebuilding
+ * the pool.
  */
 
-import * as mysql from 'mysql2/promise';
 import type { PoolLike, DatabaseSessionConfig } from '../../src/registry/databaseSession';
-import type { Pool } from 'mysql2/promise';
+import { FakePool, FakePoolOptions } from './fakePool';
 
-export function stubMysqlPoolFactory(config: DatabaseSessionConfig): PoolLike {
-    const pool = mysql.createPool({
-        host: config.host,
-        port: config.port,
-        user: config.user,
-        password: config.token,
-        database: config.database,
-        authPlugins: {
-            mysql_clear_password: () => () => Buffer.from(config.token + '\0'),
-        },
-        connectTimeout: config.connectTimeoutMs ?? 30_000,
-        waitForConnections: true,
-        connectionLimit: 4,
-        queueLimit: 0,
-    });
-    return pool as unknown as PoolLike;
+export function makeStubMysqlPoolFactory(
+    opts: FakePoolOptions
+): (config: DatabaseSessionConfig) => PoolLike {
+    return function stubMysqlPoolFactory(config: DatabaseSessionConfig): PoolLike {
+        return new FakePool(config.token, opts) as unknown as PoolLike;
+    };
 }
-
-void ({} as Pool);

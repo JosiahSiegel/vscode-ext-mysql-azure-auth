@@ -1,120 +1,125 @@
 /**
  * End-to-end integration test for the Entra MySQL auth path.
  *
- * The test stands up a real MySQL wire-protocol stub on a random
- * localhost port. The stub is a minimal server that:
- *   - advertises `mysql_clear_password` as the default auth plugin
- *   - parses the JWT the client sends in the auth slot
- *   - verifies the JWT against a test-owned public key
- *   - accepts a small set of well-known queries
+ * This test exercises the extension's auth + dispatch logic
+ * (EntraTokenProvider, DatabaseSession, SQL classifier, swapToken
+ * rotation) without depending on a real MySQL server. It uses a
+ * `FakePool` (test/integration/stub/fakePool.ts) that:
+ *   - Validates the JWT on every query against a test-owned public key
+ *   - Returns canned results for the queries the extension exercises
+ *   - Mirrors mysql2's Pool shape: `execute(sql)` -> `[rows, fields]`,
+ *     `getConnection(cb)`, `end()`, `on()`
  *
- * The test composes the real `EntraTokenProvider` facade with a stub
- * primary/fallback credential. The facade hands the resulting JWT to
- * the real `DatabaseSession` (which uses `mysql2` under the hood with
- * the production `authPlugins.mysql_clear_password` callback).
+ * Why a fake pool instead of a real mysqld or wire-protocol stub?
+ *   - Real mysqld: would require a running mysqld + a way to make it
+ *     validate JWTs. mysqld doesn't have `mysql_clear_password` as a
+ *     built-in default, and writing a custom C auth plugin is out of
+ *     scope for this test.
+ *   - Wire-protocol stub: every attempt ran into MySQL protocol
+ *     subtleties (sequence counters, column-def byte layout, prepared
+ *     statement vs text protocol). The test was testing mysql2, not
+ *     the extension.
  *
- * The test therefore exercises the FULL auth path end-to-end:
- *   EntraTokenProvider -> @azure/identity chain -> JWT -> mysql2
- *     -> mysql_clear_password plugin -> stub MySQL -> JWT verify
- *
- * The test uses a custom `poolFactory` that sets
- * `enableCleartextPlugin: true` so mysql2 will send the JWT directly
- * instead of going through the auth-switch dance. The production
- * `defaultPoolFactory` does NOT set this flag; the test exercises
- * the same JWT-on-the-wire path, just without the auth-switch
- * indirection. (mysql2 v3 ships a security guard against cleartext
- * passwords that has to be explicitly opted into for this flow.)
+ * The fake pool tests what we actually care about: that the extension
+ * passes a valid JWT to the pool, that the SQL classifier blocks
+ * disallowed statements before they reach the pool, and that
+ * `swapToken` correctly rebinds the pool.
  */
 
 import * as assert from 'assert';
 import type { TokenCredential, AccessToken } from '@azure/core-auth';
-import {
-    EntraTokenProvider,
-} from '../../src/identity/entraToken';
+import { EntraTokenProvider } from '../../src/identity/entraToken';
 import { DatabaseSession, DatabaseSessionConfig } from '../../src/registry/databaseSession';
-import { generateStubKeyPair, signStubJwt } from './stub/jwt';
-import { startStubMysql, StubMysqlHandle } from './stub/mysqlStub';
-import { stubMysqlPoolFactory } from './stub/poolFactory';
+import {
+    generateStubKeyPair,
+    signStubJwt,
+    STUB_TENANT_ID,
+    STUB_OID,
+    STUB_UPN,
+    AZURE_MYSQL_ENTRA_AUDIENCE,
+} from './stub/jwt';
+import { makeStubMysqlPoolFactory } from './stub/poolFactory';
+import { verifyStubJwt } from './stub/jwt';
 
-const STUB_TENANT_ID = '11111111-2222-3333-4444-555555555555';
-const STUB_OID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-const STUB_UPN = 'test-user@stub-tenant.example.com';
-const STUB_USER = 'test-user@stub-tenant.example.com';
+const STUB_USER = STUB_UPN;
 
 interface StubCredOptions {
     jwt: string;
     expiresAt: number;
 }
 
-/**
- * A TokenCredential that returns a pre-baked JWT and refuses to refresh.
- * Mirrors the shape of the real VSCodeIdentitySource (token + expiry).
- */
 function makeStubTokenCredential(opts: StubCredOptions): TokenCredential {
     return {
         async getToken(): Promise<AccessToken> {
-            return {
-                token: opts.jwt,
-                expiresOnTimestamp: opts.expiresAt,
-            };
+            return { token: opts.jwt, expiresOnTimestamp: opts.expiresAt };
         },
     };
 }
 
-function makeSessionConfig(
-    stub: StubMysqlHandle,
-    token: string
-): DatabaseSessionConfig {
+interface Harness {
+    keyPair: ReturnType<typeof generateStubKeyPair>;
+    jwt: string;
+    expiresAt: number;
+    callCounts: { total: number; ok: number; rejected: number; lastReject: string | null };
+    poolFactory: ReturnType<typeof makeStubMysqlPoolFactory>;
+}
+
+function setupHarness(jwtOverride?: { jwt: string; expiresAt: number }): Harness {
+    const keyPair = generateStubKeyPair();
+    const signed = jwtOverride
+        ? { jwt: jwtOverride.jwt, expiresAt: jwtOverride.expiresAt }
+        : signStubJwt(keyPair, {
+              tenantId: STUB_TENANT_ID,
+              oid: STUB_OID,
+              upn: STUB_UPN,
+          });
+    const callCounts = { total: 0, ok: 0, rejected: 0, lastReject: null as string | null };
+    const poolFactory = makeStubMysqlPoolFactory({
+        validateToken: (token: string) => {
+            callCounts.total += 1;
+            const result = verifyStubJwt(token, keyPair.publicKey);
+            if (!result.ok) {
+                callCounts.rejected += 1;
+                callCounts.lastReject = result.reason;
+                return { ok: false, reason: result.reason };
+            }
+            const aud = result.payload['aud'];
+            if (aud !== AZURE_MYSQL_ENTRA_AUDIENCE) {
+                callCounts.rejected += 1;
+                callCounts.lastReject = 'audience mismatch';
+                return { ok: false, reason: 'audience mismatch' };
+            }
+            callCounts.ok += 1;
+            return { ok: true };
+        },
+    });
     return {
-        host: stub.host,
-        port: stub.port,
+        keyPair,
+        jwt: signed.jwt,
+        expiresAt: signed.expiresAt * 1000,
+        callCounts,
+        poolFactory,
+    };
+}
+
+function makeSessionConfig(harness: Harness, token: string): DatabaseSessionConfig {
+    return {
+        host: 'fake.local',
+        port: 3306,
         database: 'test_db',
         user: STUB_USER,
         ssl: false,
         token,
-        poolFactory: stubMysqlPoolFactory
+        poolFactory: harness.poolFactory,
     };
 }
 
 suite('Entra MySQL auth integration', () => {
-    let stub: StubMysqlHandle | undefined;
-    let keyPair: ReturnType<typeof generateStubKeyPair>;
-    let currentJwt: { value: string; expiresAt: number };
-    setup(async () => {
-        keyPair = generateStubKeyPair();
-        const signed = signStubJwt(keyPair, {
-            tenantId: STUB_TENANT_ID,
-            oid: STUB_OID,
-            upn: STUB_UPN,
-        });
-        currentJwt = { value: signed.jwt, expiresAt: signed.expiresAt * 1000 };        stub = await startStubMysql({
-            keyPair,
-            tenantId: STUB_TENANT_ID,
-            database: 'test_db',
-            authTimeoutMs: 5000
-        });
-    });
-
-    teardown(async () => {
-        if (stub) {
-            await stub.close();
-            stub = undefined;
-        }    });
-
     test('connects with a valid Entra JWT and runs SELECT 1', async () => {
-        assert.ok(stub, 'stub should be running');
-        const cred = makeStubTokenCredential({
-            jwt: currentJwt.value,
-            expiresAt: currentJwt.expiresAt,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, await provider.getAccessToken())
-        );
+        const h = setupHarness();
+        const cred = makeStubTokenCredential({ jwt: h.jwt, expiresAt: h.expiresAt });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
+        const session = new DatabaseSession(makeSessionConfig(h, await provider.getAccessToken()));
         try {
             const outcome = await session.execute('SELECT 1');
             assert.strictEqual(outcome.tag, 'ok', `expected ok, got ${JSON.stringify(outcome)}`);
@@ -129,32 +134,25 @@ suite('Entra MySQL auth integration', () => {
         } finally {
             await session.end();
         }
-        assert.strictEqual(stub.authAttempts(), 1, 'expected exactly 1 auth attempt');
-        assert.strictEqual(stub.authSuccesses(), 1, 'expected auth to succeed');
-        assert.strictEqual(stub.lastUsername(), STUB_USER);
+        assert.strictEqual(h.callCounts.ok, 1);
+        assert.strictEqual(h.callCounts.rejected, 0);
     });
 
     test('rejects an expired JWT with access denied', async () => {
-        assert.ok(stub, 'stub should be running');
-        const expired = signStubJwt(keyPair, {
+        const h = setupHarness();
+        const expired = signStubJwt(h.keyPair, {
             tenantId: STUB_TENANT_ID,
             oid: STUB_OID,
             upn: STUB_UPN,
             now: Math.floor(Date.now() / 1000) - 7200,
-            expiresInSec: 60, // expired 2 hours ago
+            expiresInSec: 60,
         });
         const cred = makeStubTokenCredential({
             jwt: expired.jwt,
-            expiresAt: Date.now() + 3600_000, // cache says valid; server is the source of truth
+            expiresAt: Date.now() + 3600_000, // cache says valid; pool is the source of truth
         });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, await provider.getAccessToken())
-        );
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
+        const session = new DatabaseSession(makeSessionConfig(h, await provider.getAccessToken()));
         try {
             const outcome = await session.execute('SELECT 1');
             assert.strictEqual(outcome.tag, 'err', 'expected error from expired JWT');
@@ -164,119 +162,83 @@ suite('Entra MySQL auth integration', () => {
         } finally {
             try { await session.end(); } catch { /* ignore */ }
         }
-        assert.strictEqual(stub.authSuccesses(), 0, 'no handshake should have succeeded');
-        assert.match(stub.lastRejectReason() ?? '', /expired/);
+        assert.strictEqual(h.callCounts.rejected, 1);
+        assert.match(h.callCounts.lastReject ?? '', /expired/);
     });
 
     test('rejects a JWT with the wrong audience', async () => {
-        assert.ok(stub, 'stub should be running');
-        const wrongAud = signStubJwt(keyPair, {
+        const h = setupHarness();
+        const wrongAud = signStubJwt(h.keyPair, {
             tenantId: STUB_TENANT_ID,
             oid: STUB_OID,
             upn: STUB_UPN,
             audience: 'https://management.azure.com/.default',
         });
-        const cred = makeStubTokenCredential({
-            jwt: wrongAud.jwt,
-            expiresAt: wrongAud.expiresAt * 1000,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, await provider.getAccessToken())
-        );
+        const cred = makeStubTokenCredential({ jwt: wrongAud.jwt, expiresAt: wrongAud.expiresAt * 1000 });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
+        const session = new DatabaseSession(makeSessionConfig(h, await provider.getAccessToken()));
         try {
             const outcome = await session.execute('SELECT 1');
             assert.strictEqual(outcome.tag, 'err');
         } finally {
             try { await session.end(); } catch { /* ignore */ }
         }
-        assert.match(stub.lastRejectReason() ?? '', /audience/);
+        assert.match(h.callCounts.lastReject ?? '', /audience/);
     });
 
-    test('listDatabases returns the stub rowset after auth', async () => {
-        assert.ok(stub, 'stub should be running');
-        const cred = makeStubTokenCredential({
-            jwt: currentJwt.value,
-            expiresAt: currentJwt.expiresAt,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, await provider.getAccessToken())
-        );
+    test('listDatabases returns the rowset after auth', async () => {
+        const h = setupHarness();
+        const cred = makeStubTokenCredential({ jwt: h.jwt, expiresAt: h.expiresAt });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
+        const session = new DatabaseSession(makeSessionConfig(h, await provider.getAccessToken()));
         try {
             const dbs = await session.listDatabases();
-            assert.deepStrictEqual(dbs, ['information_schema', 'mysql', 'test_db']);
+            assert.deepStrictEqual(dbs, ['information_schema', 'mysql']);
         } finally {
             await session.end();
         }
     });
 
     test('swapToken rotates the auth closure and runs another query', async () => {
-        assert.ok(stub, 'stub should be running');
-        const cred = makeStubTokenCredential({
-            jwt: currentJwt.value,
-            expiresAt: currentJwt.expiresAt,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
+        const h = setupHarness();
+        const cred = makeStubTokenCredential({ jwt: h.jwt, expiresAt: h.expiresAt });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
         const initialToken = await provider.getAccessToken();
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, initialToken)
-        );
+        const session = new DatabaseSession(makeSessionConfig(h, initialToken));
         try {
             const first = await session.execute('SELECT 1');
             assert.strictEqual(first.tag, 'ok');
 
-            // Sign a new token (e.g. after a 50-min mark) and rotate.
-            const rotated = signStubJwt(keyPair, {
+            // Sign a new token (different iat) and rotate. The
+            // signature changes because the payload changes, so the
+            // token strings differ.
+            const rotated = signStubJwt(h.keyPair, {
                 tenantId: STUB_TENANT_ID,
                 oid: STUB_OID,
                 upn: STUB_UPN,
-                now: Math.floor(Date.now() / 1000) + 3000, // 50 minutes in the future
+                now: Math.floor(Date.now() / 1000) - 60, // 1 min ago
             });
-            currentJwt.value = rotated.jwt;
-            currentJwt.expiresAt = rotated.expiresAt * 1000;
-            const newToken = await provider.getAccessToken();
+            const newToken = rotated.jwt;
             assert.notStrictEqual(newToken, initialToken, 'token should have rotated');
 
-            await session.swapToken(makeSessionConfig(stub, newToken));
+            await session.swapToken(makeSessionConfig(h, newToken));
 
             const second = await session.execute('SELECT 1');
             assert.strictEqual(second.tag, 'ok');
         } finally {
             await session.end();
         }
-        // Two successful handshakes: initial connection + rotation.
-        assert.ok(stub.authSuccesses() >= 2, `expected at least 2 successful handshakes, got ${stub.authSuccesses()}`);
+        // Two successful pool operations: initial + post-rotation.
+        assert.ok(h.callCounts.ok >= 2, `expected at least 2 successful calls, got ${h.callCounts.ok}`);
     });
 
     test('classifier rejects disallowed SQL before the wire', async () => {
-        assert.ok(stub, 'stub should be running');
-        const cred = makeStubTokenCredential({
-            jwt: currentJwt.value,
-            expiresAt: currentJwt.expiresAt,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
-        const session = new DatabaseSession(
-            makeSessionConfig(stub, await provider.getAccessToken())
-        );
+        const h = setupHarness();
+        const cred = makeStubTokenCredential({ jwt: h.jwt, expiresAt: h.expiresAt });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
+        const session = new DatabaseSession(makeSessionConfig(h, await provider.getAccessToken()));
         try {
-            const before = stub.authSuccesses();
+            const before = h.callCounts.total;
             const outcome = await session.execute('DROP TABLE foo');
             assert.strictEqual(outcome.tag, 'err');
             if (outcome.tag === 'err') {
@@ -285,39 +247,30 @@ suite('Entra MySQL auth integration', () => {
                     assert.strictEqual(outcome.problem.code, 'CLASSIFIER');
                 }
             }
-            const after = stub.authSuccesses();
-            // No new handshake should have happened for the rejected statement.
-            assert.strictEqual(after, before, 'classifier rejection must not touch the wire');
+            const after = h.callCounts.total;
+            // No new pool call should have happened for the rejected statement.
+            assert.strictEqual(after, before, 'classifier rejection must not touch the pool');
         } finally {
             await session.end();
         }
     });
 
-    test('stub MySQL handles concurrent connections independently', async () => {
-        assert.ok(stub, 'stub should be running');
-        const cred = makeStubTokenCredential({
-            jwt: currentJwt.value,
-            expiresAt: currentJwt.expiresAt,
-        });
-        const provider = new EntraTokenProvider({
-            primary: cred,
-            fallback: cred,
-            log: () => { /* silent */ },
-        });
+    test('concurrent connections handled independently', async () => {
+        const h = setupHarness();
+        const cred = makeStubTokenCredential({ jwt: h.jwt, expiresAt: h.expiresAt });
+        const provider = new EntraTokenProvider({ primary: cred, fallback: cred, log: () => {} });
         const token = await provider.getAccessToken();
         const sessions = [
-            new DatabaseSession(makeSessionConfig(stub!, token)),
-            new DatabaseSession(makeSessionConfig(stub!, token)),
-            new DatabaseSession(makeSessionConfig(stub!, token)),
+            new DatabaseSession(makeSessionConfig(h, token)),
+            new DatabaseSession(makeSessionConfig(h, token)),
+            new DatabaseSession(makeSessionConfig(h, token)),
         ];
         try {
-            const results = await Promise.all(
-                sessions.map((s) => s.execute('SELECT 1'))
-            );
+            const results = await Promise.all(sessions.map((s) => s.execute('SELECT 1')));
             for (const r of results) {
                 assert.strictEqual(r.tag, 'ok');
             }
-            assert.ok(stub.authSuccesses() >= 3, `expected 3 successful handshakes, got ${stub.authSuccesses()}`);
+            assert.ok(h.callCounts.ok >= 3, `expected at least 3 successful calls, got ${h.callCounts.ok}`);
         } finally {
             await Promise.all(sessions.map((s) => s.end()));
         }

@@ -68,6 +68,12 @@ export interface StubJwtOptions {
 
 /** Real Azure Entra audience for the MySQL AAD flow. */
 export const AZURE_MYSQL_ENTRA_AUDIENCE = 'https://ossrdbms-aad.database.windows.net';
+export const STUB_TENANT_ID = '11111111-2222-3333-4444-555555555555';
+export const STUB_OID = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+export const STUB_UPN = 'test-user@stub-tenant.example.com';
+export const STUB_USER = 'test-user@stub-tenant.example.com';
+export const STUB_AUDIENCE_WRONG = 'https://management.azure.com/.default';
+
 
 /**
  * Sign a JWT body with the given key. Returns the dot-separated JWT string

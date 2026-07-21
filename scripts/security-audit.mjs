@@ -37,8 +37,22 @@ const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, "..");
 
 function resolveNpmCli() {
+  // npm is shipped as a Node module that lives next to (or near) the
+  // Node binary. The two "standard" install locations are:
+  //   1. Sibling to node:  <node-bin>/../lib/node_modules/npm/bin/npm-cli.js
+  //      (used by the official Node tarball install on Linux/macOS, and
+  //      by most distro packages that put node in /usr/bin and npm's
+  //      module in /usr/lib.)
+  //   2. Adjacent to node: <node-bin>/node_modules/npm/bin/npm-cli.js
+  //      (used by some minimal installs, e.g. nvm-style user installs.)
+  //   3. The project-local copy (transitively installed as a devDep in
+  //      many projects; checked last because it is the most likely to
+  //      be missing in CI containers that ran `npm ci --omit=dev`.)
+  const execDir = dirname(process.execPath);
   const candidates = [
-    join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"),
+    join(execDir, "node_modules", "npm", "bin", "npm-cli.js"),
+    join(execDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
+    join(execDir, "..", "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"),
     resolve(ROOT, "node_modules", "npm", "bin", "npm-cli.js"),
   ];
   for (const c of candidates) {

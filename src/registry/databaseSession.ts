@@ -409,6 +409,9 @@ function defaultPoolFactory(config: DatabaseSessionConfig): PoolLike {
         queueLimit: 0,
     };
     if (config.ssl) {
+        // Require a valid cert chain against the system trust store.
+        // Mismatches here are the most common reason an Azure MySQL
+        // Flexible Server rejects a connection.
         poolOptions.ssl = { rejectUnauthorized: true };
     }
     const pool = mysql.createPool(poolOptions);

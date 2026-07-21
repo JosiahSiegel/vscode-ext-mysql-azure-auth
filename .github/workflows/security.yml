@@ -39,10 +39,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node 20.16.0
-        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -60,12 +60,12 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
       - name: Setup Node 20.16.0
-        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -83,10 +83,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node 20.16.0
-        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -99,7 +99,7 @@ jobs:
 
       - name: Upload SBOM artifact
         if: always()
-        uses: actions/upload-artifact@65c4c4a8c6fbf1c2ecc65fa49c6630668691b4d6 # v4.6.0
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: sbom-cdx-${{ github.sha }}
           path: .omo/evidence/sbom.cdx.json
@@ -112,10 +112,10 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@11bd71901aa5d161a31aec1466cdc8410ef540e8 # v4.2.2
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node 20.16.0
-        uses: actions/setup-node@49933ea8898ce3e40b4c8c2c82b1edafc3547c1f # v4.4.0
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version-file: ".node-version"
           cache: "npm"
@@ -128,7 +128,7 @@ jobs:
 
       - name: Upload license inventory artifact
         if: always()
-        uses: actions/upload-artifact@65c4c4a8c6fbf1c2ecc65fa49c6630668691b4d6 # v4.6.0
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: licenses-runtime-${{ github.sha }}
           path: .omo/evidence/licenses.json

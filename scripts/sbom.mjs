@@ -70,9 +70,21 @@ if (resolvedVersion !== REQUIRED_VERSION) {
 // from spawning `npm run --silent npm_execpath` itself.
 function resolveNpmCli() {
   const candidates = [];
-  // Sibling of process.execPath (the node binary installed alongside npm).
-  candidates.push(join(dirname(process.execPath), "node_modules", "npm", "bin", "npm-cli.js"));
-  // Repo-local npm via node_modules (in case of a future npm-shim install).
+  // npm is shipped as a Node module that lives next to (or near) the
+  // Node binary. We probe the standard install locations in order:
+  //   1. Sibling to node: <node-bin>/node_modules/npm/bin/npm-cli.js
+  //      (nvm-style user installs.)
+  //   2. Standard system install: <node-bin>/../lib/node_modules/npm/bin/npm-cli.js
+  //      (official Node tarball, most distro packages, the OpenClaw
+  //      sandbox.)
+  //   3. One more level out: <node-bin>/../../lib/node_modules/npm/bin/npm-cli.js
+  //      (some Linux distros nest deeper.)
+  //   4. Repo-local npm via node_modules (in case of a future npm-shim
+  //      install inside the project.)
+  const execDir = dirname(process.execPath);
+  candidates.push(join(execDir, "node_modules", "npm", "bin", "npm-cli.js"));
+  candidates.push(join(execDir, "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
+  candidates.push(join(execDir, "..", "..", "lib", "node_modules", "npm", "bin", "npm-cli.js"));
   candidates.push(resolve(ROOT, "node_modules", "npm", "bin", "npm-cli.js"));
   for (const c of candidates) {
     if (existsSync(c)) return c;

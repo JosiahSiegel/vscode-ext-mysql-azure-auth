@@ -212,7 +212,9 @@
     "package": "npm run esbuild:minified && vsce package --no-dependencies",
     "build:test": "node esbuild.config.test.js",
     "build:integration": "node esbuild.config.integration.js",
+    "build:stub": "node esbuild.config.stub.js",
     "test:unit": "npm run build:test && node ./out/test/runUnitTests.js",
+    "test:stub": "npm run build:stub && node ./out/test/integration/src/test/runStubTests.js",
     "test:integration": "npm run compile && node ./out/test/runTest.js",
     "test": "npm run lint && npm run typecheck && npm run test:unit && npm run test:integration",
     "pretest": "npm run compile"

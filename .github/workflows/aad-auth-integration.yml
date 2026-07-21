@@ -1,18 +1,21 @@
-# Hermes CI: stub integration test
+# Azure MySQL AAD auth integration test
 #
-# Spins up a real MySQL wire-protocol stub on localhost and runs the
-# `test:stub` integration test suite. The stub implements just enough
-# of the MySQL 8.0 handshake (advertising `mysql_clear_password` as
-# the default auth plugin) to validate that the extension's auth path
-# (Entra JWT -> mysql2 -> wire -> server) actually works end-to-end
-# without needing a real Azure MySQL Flexible Server.
+# Runs the hermetic test suite for the Entra MySQL auth path. The
+# suite exercises `EntraTokenProvider`, `DatabaseSession`, the SQL
+# classifier, and `swapToken` rotation against a fake `mysql2/promise`
+# pool that validates JWTs against a test-owned RSA public key.
 #
-# Required check: any PR that changes the auth path (EntraTokenProvider,
-# DatabaseSession, or the stub itself) cannot merge until this workflow
-# is green. To enforce, add "Hermes Stub Integration / test" as a
-# required status check under Settings -> Branches.
+# This is NOT a MySQL wire-protocol test — that is mysql2's job. The
+# fake pool tests what this extension actually owns: the auth + query
+# dispatch path. A real `mysqld` would be a different test.
+#
+# Required check: any PR that changes `src/identity/**`,
+# `src/registry/**`, or `test/integration/**` cannot merge until this
+# workflow is green. To enforce, add "Azure MySQL AAD Auth Integration
+# / test (ubuntu-latest)" as a required status check under
+# Settings -> Branches -> Branch protection rules -> main.
 
-name: Hermes Stub Integration
+name: Azure MySQL AAD Auth Integration
 
 on:
   push:
@@ -53,13 +56,6 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      - name: Install OpenSSL
-        if: matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          # Git for Windows ships with OpenSSL; CI runners have it on PATH already.
-          openssl version
-
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
@@ -71,7 +67,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/actions/upload-artifact@v4
         with:
           name: stub-test-log-${{ matrix.os }}
           path: |

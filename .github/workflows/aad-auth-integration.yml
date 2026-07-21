@@ -67,7 +67,7 @@ jobs:
 
       - name: Upload test log on failure
         if: failure()
-        uses: actions/actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
           name: stub-test-log-${{ matrix.os }}
           path: |

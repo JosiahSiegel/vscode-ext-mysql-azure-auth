@@ -51,8 +51,16 @@ export class CachedIdentityProvider implements TokenCredential {
     constructor(
         private readonly inner: TokenCredential,
         private readonly clock: () => number = Date.now,
-        /** Minimum remaining validity before we re-fetch. */
-        private readonly safetyMarginMs: number = 60_000
+        /**
+         * Minimum remaining validity before we re-fetch. The previous
+         * 60_000ms default was too aggressive: a token with a 60-second
+         * lifetime (e.g. the unit-test probe, or any short-lived
+         * credential) would never be served from the cache, because the
+         * 60s safety margin consumed its entire validity window. 5s is
+         * enough to absorb clock skew and network latency without
+         * invalidating short-lived tokens.
+         */
+        private readonly safetyMarginMs: number = 5_000
     ) {}
 
     async getToken(scopes: string | string[], options?: GetTokenOptions): Promise<AccessToken> {
